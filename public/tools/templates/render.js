@@ -30,7 +30,6 @@ export const WATERMARKS = [
 export const FOOTERS = [['none', 'None'], ['name', 'Name'], ['page', 'Page no.'], ['both', 'Both']];
 export const SUB_ALIGNS = [['same', 'Match name'], ['left', 'Left'], ['center', 'Centre'], ['right', 'Right']];
 export const SUB_BGS = [['none', 'None'], ['band', 'Grey band'], ['black', 'Black band'], ['outline', 'Outline box'], ['tag', 'Black tag']];
-export const DATE_STYLES = [['none', 'None'], ['line', 'Write-in line'], ['boxes', '__ / __ / __'], ['weekdays', 'Line + weekdays'], ['today', "Today's date"]];
 export const DATE_POSITIONS = [['header', 'In header'], ['row', 'Own row'], ['footer', 'Footer']];
 export const ALIGNS = [['left', 'Left'], ['center', 'Centre'], ['right', 'Right']];
 
@@ -47,19 +46,20 @@ export const DEFAULTS = {
   subSize: 4, // mm
   subGap: 1.5, // mm above the second line
   subBg: 'none',
-  dateStyle: 'none',
+  dateOn: false,
+  dateWeekdays: false,
   datePos: 'header',
   dateAlign: 'right', // for datePos 'row'
   dateLabel: 'Date',
   dateSize: 3.5, // mm
   watermark: 'none',
   watermarkSize: 28, // mm
-  watermarkShade: 228, // 0 black … 255 white
+  watermarkShade: 221, // 0 black … 255 white
   footer: 'none',
   pattern: 'lined',
   spacing: 8, // mm between lines / grid cells / rows
   majorEvery: 5,
-  lineShade: 165,
+  lineShade: 153,
   lineWeight: 'regular',
   leftRule: false,
   marginTop: 8,
@@ -71,12 +71,18 @@ export const DEFAULTS = {
 export function migrate(s) {
   const out = { ...s };
   if ('date' in out) {
-    if (out.dateStyle === undefined) {
-      if (out.date === 'blank') { out.dateStyle = 'line'; out.datePos = 'header'; }
-      else if (out.date === 'today') { out.dateStyle = 'today'; out.datePos = 'header'; }
-    }
+    if (out.dateOn === undefined && out.dateStyle === undefined) out.dateOn = out.date === 'blank' || out.date === 'today';
     delete out.date;
   }
+  if ('dateStyle' in out) {
+    // Build 15–16 date styles collapse to on/off + weekdays.
+    if (out.dateOn === undefined) out.dateOn = out.dateStyle !== 'none';
+    if (out.dateWeekdays === undefined) out.dateWeekdays = out.dateStyle === 'weekdays';
+    delete out.dateStyle;
+    delete out.datePos; delete out.dateAlign; delete out.dateSize; // no longer set from the UI
+  }
+  // Old shade values from the mislabeled buttons were strings; fall back to defaults.
+  for (const k of ['lineShade', 'watermarkShade']) if (k in out && !Number.isFinite(Number(out[k]))) delete out[k];
   return out;
 }
 
@@ -137,7 +143,7 @@ export function render(ctx, W, H, input, o = {}) {
   if (name && s.watermark !== 'none') drawWatermark(d, page);
 
   // Where the date field goes. "In header" falls back to its own row when there is no name header.
-  const hasDate = s.dateStyle !== 'none' && !(s.dateStyle === 'today' && !o.date);
+  const hasDate = !!s.dateOn;
   const nameRow = s.header !== 'none' && !!name;
   d.datePos = !hasDate ? 'none' : s.datePos === 'header' && !nameRow ? 'row' : s.datePos;
 
@@ -203,21 +209,10 @@ function layoutDate(d, px) {
   const slot = (w) => parts.push({ kind: 'slot', w });
   const space = (w) => parts.push({ kind: 'space', w });
 
-  if (s.dateStyle === 'today') {
-    if (label) { text(label); space(gap); }
-    text(d.o.date || '');
-  } else {
-    if (label) { text(label); space(gap); }
-    if (s.dateStyle === 'boxes') {
-      slot(px * 1.7); space(gap * 0.6); text('/'); space(gap * 0.6);
-      slot(px * 1.7); space(gap * 0.6); text('/'); space(gap * 0.6);
-      slot(px * 2.2);
-    } else {
-      slot(px * 7.5);
-    }
-    if (s.dateStyle === 'weekdays') {
-      for (const day of ['M', 'T', 'W', 'T', 'F', 'S', 'S']) { space(px * 0.75); text(day); }
-    }
+  if (label) { text(label); space(gap); }
+  slot(px * 7.5);
+  if (s.dateWeekdays) {
+    for (const day of ['S', 'M', 'T', 'W', 'T', 'F', 'S']) { space(px * 0.75); text(day); }
   }
   const w = parts.reduce((a, p) => a + p.w, 0);
   return {
@@ -623,7 +618,7 @@ function drawPattern(d, R) {
       const values = {
         PROJECT: d.name,
         SHEET: d.o.pages ? `${d.o.page || 1} / ${d.o.pages}` : '',
-        DATE: d.s.dateStyle === 'today' ? d.o.date || '' : '',
+        DATE: '',
         SCALE: '',
       };
       cells.forEach(([key, frac], i) => {

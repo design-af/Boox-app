@@ -1,6 +1,6 @@
 // Template Maker — UI. Drawing lives in render.js, PDF output in pdf.js,
 // file access in the native TemplateFiles plugin (TemplateFilesPlugin.java).
-import { render, migrate, DEFAULTS, PATTERNS, HEADERS, WATERMARKS, FOOTERS, SUB_ALIGNS, SUB_BGS, DATE_STYLES, DATE_POSITIONS, ALIGNS, usesPageNumbers, safeFileName } from './render.js';
+import { render, migrate, DEFAULTS, PATTERNS, HEADERS, WATERMARKS, FOOTERS, SUB_ALIGNS, SUB_BGS, usesPageNumbers, safeFileName } from './render.js';
 import { buildPdf, toGray } from './pdf.js';
 
 const $ = (id) => document.getElementById(id);
@@ -59,8 +59,9 @@ function today() {
 
 /* ---------- settings panel (declarative) ---------- */
 
-const SHADES_LINE = [['Faint', 205], ['Light', 185], ['Medium', 165], ['Dark', 120], ['Black', 0]];
-const SHADES_MARK = [['Faint', 240], ['Light', 228], ['Medium', 205], ['Dark', 170]];
+// [value, label] like every other option list. Spaced on e-ink's 16 grey levels so each step is visible.
+const SHADES_LINE = [[221, 'Faint'], [187, 'Light'], [153, 'Medium'], [102, 'Dark'], [0, 'Black']];
+const SHADES_MARK = [[238, 'Faint'], [221, 'Light'], [204, 'Medium'], [170, 'Dark']];
 const spacingLabel = () => ({ lined: 'Line spacing', cornell: 'Line spacing', meeting: 'Line spacing', todo: 'Row height', isometric: 'Triangle size', titleblock: 'Dot spacing', blank: 'Spacing' }[state.s.pattern] || 'Grid size');
 
 const GROUPS = [
@@ -85,11 +86,9 @@ const GROUPS = [
     { type: 'step', key: 'subGap', label: 'Space above', min: 0, max: 20, step: 0.5, unit: 'mm' },
   ] },
   { title: 'Date', rows: [
-    { type: 'seg', key: 'dateStyle', label: 'Date field', options: DATE_STYLES, grid: true, hint: 'Write-in styles leave a line to date each page by hand, journal-style.' },
-    { type: 'seg', key: 'datePos', label: 'Position', options: DATE_POSITIONS, when: () => state.s.dateStyle !== 'none' },
-    { type: 'seg', key: 'dateAlign', label: 'Alignment on its row', options: ALIGNS, when: () => state.s.dateStyle !== 'none' && (state.s.datePos === 'row' || state.s.header === 'none') },
-    { type: 'text', key: 'dateLabel', label: 'Label', hint: 'Shown before the line, e.g. Date, Day, Entry. Leave empty for just the line.', when: () => state.s.dateStyle !== 'none' },
-    { type: 'step', key: 'dateSize', label: 'Date size', min: 2, max: 12, step: 0.5, unit: 'mm', when: () => state.s.dateStyle !== 'none' },
+    { type: 'toggle', key: 'dateOn', label: 'Date field', hint: 'A line to date each page by hand, opposite the name in the header.' },
+    { type: 'text', key: 'dateLabel', label: 'Label', hint: 'Shown before the line, e.g. Date, Day, Entry.', when: () => state.s.dateOn },
+    { type: 'toggle', key: 'dateWeekdays', label: 'Weekdays to circle (S M T W T F S)', when: () => state.s.dateOn },
   ] },
   { title: 'Watermark & footer', rows: [
     { type: 'seg', key: 'watermark', label: 'Watermark', options: WATERMARKS, grid: true },
