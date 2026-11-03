@@ -96,12 +96,50 @@ for (const [tid, figs] of Object.entries(ARE_FIGURES || {})) {
 }
 if (!ARE_EXTRAS || !(ARE_EXTRAS.groups || []).length) fail('extras missing');
 
-// 4. Offline: nothing in the page may reach the network.
+// 4. Narration: the pronunciation layer turns every chapter and card into plain words.
+const sp = { window: {} };
+vm.createContext(sp);
+try { vm.runInContext(fs.readFileSync(path.join(root, 'speech.js'), 'utf8'), sp, { filename: 'speech.js' }); }
+catch (e) { fail(`speech.js: ${e.message}`); }
+const SP = sp.window.ARE_SPEECH;
+if (!/<script src="speech\.js"><\/script>/.test(html)) fail('index.html does not load speech.js');
+let nSpoken = 0;
+if (SP) {
+  const cases = [
+    ['B101', 'bee one oh one'], ['§2.2', 'section two point two'], ['50 psf', 'fifty pounds per square foot'],
+    ['80,000 gsf', 'eighty thousand gross square feet'], ['STC 50', 'sound transmission class fifty'],
+    ['the AHJ', 'the authority having jurisdiction'], ['a GMP', 'a guaranteed maximum price'],
+    ['1½ hr', 'one and a half hour'], ['16–18″', 'sixteen to eighteen inches'], ['1:12', 'one in twelve'],
+    ['Type V-B', 'type five bee'], ['Group I-2', 'group eye two'], ['±10–15%', 'plus or minus ten to fifteen percent'],
+    ['$4,987,500', 'four million nine hundred eighty-seven thousand five hundred dollars'],
+    ['A-301', 'ay three oh one'], ['R-13', 'ar thirteen'], ['3/4" = 1\'-0"', 'three quarter inch equals one foot'],
+    ['Title VII', 'title seven'], ['1978', 'nineteen seventy-eight'], ['90° − latitude', 'ninety degrees minus latitude'],
+    ['RFIs', 'ar ef eyes'], ['WILL NOT', 'will not'], ['1:48', 'one in forty-eight'], ['§8.1.3', 'section eight point one point three'],
+  ];
+  for (const [src, want] of cases) {
+    const got = SP.speak(src).toLowerCase();
+    if (got !== want) fail(`speech: "${src}" → "${got}", expected "${want}"`);
+  }
+  // Nothing a voice would stumble on may survive: digits, symbols, or unexpanded capitals.
+  const leftover = /[0-9%$§±°×÷=\/"″′<>*_#|\[\]{}→—–½¼¾⅓⅔⅛⅜⅝⅞]|\b[A-Z]{2,}\b/;
+  for (const id of DIVS) for (const t of ARE_DATA[id]?.topics || []) {
+    const items = SP.chapterItems(t).concat(SP.cardItems(t.cards || [], 5000));
+    for (const it of items) {
+      nSpoken++;
+      const m = it.text.match(leftover);
+      if (m) fail(`speech ${t.id}: "${m[0]}" left in "…${it.text.slice(Math.max(0, m.index - 40), m.index + 30)}…"`);
+      if (it.text.length > 3600) fail(`speech ${t.id}: item over the TTS input limit`);
+    }
+  }
+}
+
+// 5. Offline: nothing in the page may reach the network.
 if (/https?:\/\/(fonts\.googleapis|fonts\.gstatic)/.test(html)) fail('index.html still loads Google Fonts');
 for (const m of html.matchAll(/url\((fonts\/[^)]+)\)/g)) if (!fs.existsSync(path.join(root, m[1]))) fail(`font missing: ${m[1]}`);
 
 console.log(`ARE content: ${DIVS.length} divisions, ${nTopics} topics, ${nCards} cards, ${nQ} questions`,
   Object.entries(kinds).map(([k, n]) => `${k} ${n}`).join(', '));
+console.log(`Narration: ${SP ? SP.rules : 0} pronunciation rules, ${nSpoken} spoken items checked`);
 if (errors.length) {
   console.error(`\n${errors.length} problem(s):\n  ` + errors.join('\n  '));
   process.exit(1);

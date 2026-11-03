@@ -26,8 +26,16 @@ docs/                   Per-tool notes (docs/ARE-HANDOFF.md)
 3. Add a card for it in the root `index.html`.
 4. If it has content worth validating, add a script under `scripts/` and chain it into `npm test`.
 
-Android's back button can be handled from a plain page through `window.Capacitor.Plugins.App`
-(see `goBack()` in the ARE tool).
+Plain pages get Capacitor's bridge but not `Capacitor.Plugins` (that comes from `@capacitor/core`).
+Call native code through the bridge directly: `Capacitor.addListener("App", "backButton", fn)` and
+`Capacitor.nativePromise("Narrator", "speak", {...})` — see `goBack()` and `speech.js` in the ARE tool.
+
+## Native code
+
+`android/app/src/main/java/af/design/boox/` holds a local Capacitor plugin, `Narrator`
+(`NarratorPlugin.java`), registered in `MainActivity`. It drives `NarrationService`, a foreground
+media-playback service that reads a queue aloud with Android TextToSpeech, so ARE chapters and the
+hands-free card drill keep playing with the screen off. It needs a TTS engine installed on the tablet.
 
 ## Never change
 

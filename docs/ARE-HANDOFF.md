@@ -272,6 +272,9 @@ Both open problems become solvable:
    bee", `Group I-2` → "group eye two", `±10–15%` → "plus or minus ten to fifteen percent".
    Content files stay untouched; the audio layer derives speech text from the same data.
    A listened chapter should mark itself read like a scrolled one.
+   **Done in the Android app:** `speech.js` holds the normaliser (checked against every chapter and
+   card by `npm test`), the chapter listen-along and the hands-free drill; the native `Narrator`
+   plugin plays it from a foreground service so it continues with the screen off.
 2. **Offline packaging.**
 3. **More case studies.** One per division is thin; PPD and PDD carry more on the real exam.
 4. **Hot-spot coverage is light** — only 4 items, because each needs a hand-drawn SVG.

@@ -308,6 +308,7 @@ a.btn{display:inline-flex;align-items:center;justify-content:center;text-decorat
 <script src="data/cases2.js"></script>
 <script src="data/figures.js"></script>
 <script src="data/extras.js"></script>
+<script src="speech.js"></script>
 <script>
 (function(){
 "use strict";
@@ -325,7 +326,7 @@ var EXTRAS = window.ARE_EXTRAS;
 
 /* ---------- progress ---------- */
 var LS = "are5.progress.v3";
-var prog = { topics:{}, mocks:{}, misses:{}, cases:{}, seq:null, passed:{}, settings:{ eink:false, theme:"system", size:1 } };
+var prog = { topics:{}, mocks:{}, misses:{}, cases:{}, seq:null, passed:{}, settings:{ eink:false, theme:"system", size:1, rate:1, gap:5 } };
 
 function loadLocal(){
   try{
@@ -1004,6 +1005,8 @@ function vTopic(){
     + rowBtn("cards", t, "Flashcards", (p.known||[]).length + " of " + (t.cards||[]).length + " recalled" + (nDue ? " · " + nDue + " due" : ""))
     + rowBtn("quiz", t, "Topic quiz", (t.quiz||[]).length + " questions · best " + Math.round((p.quizBest||0)*100) + "%")
     + "</div>";
+  if(NAR.available) h += '<div class="row" style="margin-top:12px"><button class="btn btn-sm" data-listen="chapter">▶ Listen to the chapter</button>'
+    + ((t.cards||[]).length ? '<button class="btn btn-sm" data-go=\'{"v":"drill","d":"' + t._div.id + '","t":"' + t.id + '","mode":"topic"}\'>▶ Hands-free cards</button>' : "") + "</div>";
 
   h += '<hr class="divider"><span class="eyebrow">How confident are you on this topic?</span>'
     + '<p class="small muted" style="margin:6px 0 8px">1 = could not answer it cold. 5 = could explain it to someone else.</p>'
@@ -1021,7 +1024,7 @@ function rowBtn(v, t, label, sub){
 function vRead(){
   var t = topicOf(route); if(!t) return vDiv();
   var blocks = t.read || [], i = Math.min(route.i || 0, blocks.length - 1);
-  var h = '<div class="read">' + blockHTML(blocks[i]);
+  var h = (narrFor("chapter", t.id) ? narrErrHTML() : "") + '<div class="read">' + blockHTML(blocks[i]);
   (FIGS[t.id] || []).forEach(function(f){ if(f.after === i) h += figHTML(f); });
   h += "</div>";
   h += '<div class="pager"><button class="btn btn-sm" data-page="' + (i-1) + '"' + (i === 0 ? " disabled" : "") + ">← Back</button>"
@@ -1262,6 +1265,22 @@ function vSettings(){
     + '<div class="kv"><span><b>Theme</b><br><span class="small muted">Ignored while e-ink mode is on.</span></span>'
     + '<button class="btn btn-sm" data-set="theme">' + esc(s.theme) + "</button></div>";
 
+  var speeds = prog.settings.rate || 1;
+  h += '<h3 style="margin:26px 0 10px">Listening</h3>';
+  if(!NAR.available) h += '<p class="small muted">Read-aloud is not available here. It works in the tablet app and in desktop browsers with speech built in.</p>';
+  else {
+    h += '<div class="kv"><span><b>Reading speed</b></span><span class="row" style="flex-wrap:nowrap;align-items:center">'
+      + '<button class="btn btn-sm" data-nset="rate" data-by="-1">−</button><span class="num" style="min-width:3.2em;text-align:center">' + speeds.toFixed(2).replace(/0$/, "") + "×</span>"
+      + '<button class="btn btn-sm" data-nset="rate" data-by="1">+</button></span></div>'
+      + '<div class="kv"><span><b>Think time</b><br><span class="small muted">Gap between a card\'s prompt and its answer in the hands-free drill.</span></span><span class="row" style="flex-wrap:nowrap;align-items:center">'
+      + '<button class="btn btn-sm" data-nset="gap" data-by="-1">−</button><span class="num" style="min-width:3.2em;text-align:center">' + (prog.settings.gap || 5) + " s</span>"
+      + '<button class="btn btn-sm" data-nset="gap" data-by="1">+</button></span></div>';
+    if(NAR.engine === "native"){
+      h += narCheck.ok ? '<p class="small muted">Uses the tablet\'s text-to-speech engine and keeps reading with the screen off. If the Boox stops it after a while, allow AFS Custom Boox to run in the background in the Boox app-management / battery settings (turn off freezing for this app).</p>'
+        : '<div class="note"><b>No speech engine</b>No text-to-speech engine is installed on this tablet. Install one from the app store (Google\'s Speech Services, for example), set it as the default under Android Settings → Text-to-speech output, then come back.</div>';
+    } else h += '<p class="small muted">Uses this browser\'s speech. In a browser, reading stops when the screen sleeps — the tablet app keeps going.</p>';
+  }
+
   h += '<h3 style="margin:26px 0 10px">Your progress</h3>'
     + '<p class="small muted">Progress saves on this device straight away. Automatic sync between tablets is not set up in the app yet, so for now use the box below to copy your progress from one device to the other.</p>'
     + '<label class="field" for="io">Progress data</label><textarea id="io" spellcheck="false"></textarea>'
@@ -1285,6 +1304,7 @@ function render(){
   else if(v === "topic") out = vTopic();
   else if(v === "read") out = vRead();
   else if(v === "cards") out = vCards();
+  else if(v === "drill") out = vDrill();
   else if(v === "due") out = vDue();
   else if(v === "review") out = vReview();
   else if(v === "run") out = vRun();
@@ -1337,6 +1357,13 @@ function render(){
 }
 function railFor(){
   var v = route.v;
+  var here = narr && ((v === "read" && narrFor("chapter", route.t)) || (v === "drill" && narr.kind === "drill" && narr.mode === route.mode && (route.mode === "due" || narr.t === route.t)));
+  if(here && narrLive()) return railNarr();
+  var np = narrLive() && v !== "run" ? '<button class="btn" data-listen="goto">' + (narr.state === "playing" ? "♪ Now playing" : "♪ Paused") + "</button>" : "";
+  return np + railBase();
+}
+function railBase(){
+  var v = route.v;
   if(v === "home") return '<button class="btn" data-go=\'{"v":"search"}\'>Search</button>'
     + '<button class="btn btn-primary" data-resume="1">Study next</button>';
   if(v === "div"){
@@ -1355,8 +1382,14 @@ function railFor(){
   }
   if(v === "read" || v === "cards"){
     var t2 = topicOf(route); if(!t2) return "";
-    return '<button class="btn" data-go=\'{"v":"topic","d":"' + t2._div.id + '","t":"' + t2.id + '"}\'>Topic home</button>';
+    var r2 = '<button class="btn" data-go=\'{"v":"topic","d":"' + t2._div.id + '","t":"' + t2.id + '"}\'>Topic home</button>';
+    if(NAR.available && v === "read") r2 += '<button class="btn" data-listen="chapter">▶ Listen</button>';
+    if(NAR.available && v === "cards" && (t2.cards||[]).length) r2 += '<button class="btn" data-go=\'{"v":"drill","d":"' + t2._div.id + '","t":"' + t2.id + '","mode":"topic"}\'>▶ Hands-free</button>';
+    return r2;
   }
+  if(v === "drill") return "";
+  if(v === "due" && NAR.available && dueCards().length) return '<button class="btn" data-go=\'{"v":"home"}\'>ARE Prep home</button>'
+    + '<button class="btn" data-go=\'{"v":"drill","mode":"due"}\'>▶ Hands-free</button>';
   if(v === "run") return "";
   return '<button class="btn" data-go=\'{"v":"home"}\'>ARE Prep home</button>';
 }
@@ -1398,26 +1431,156 @@ function startReview(limit){
     back:{ v:"home" }, items:list.map(function(r){ return { q:r.q, t:r.t, ref:r.ref }; }) });
 }
 
+
+/* ---------- narration (HANDOFF §9) ----------
+   Chapters read aloud page by page and mark themselves read when finished; flashcards run as a
+   hands-free drill (prompt, think time, answer) that never touches the review schedule. On the
+   tablet a native service plays the queue, so it carries on with the screen off. */
+var NAR = window.ARE_NARRATOR || { available:false, engine:"none" };
+var SP = window.ARE_SPEECH;
+var LSN = "are5.narr", narr = null, narCheck = { ok:true };
+var RATES = [0.7, 0.85, 1, 1.15, 1.3, 1.5, 1.75, 2];
+function topicById(id){ for(var i=0;i<DIVS.length;i++){ var t = DIVS[i].topics.filter(function(x){ return x.id === id; })[0]; if(t) return t; } return null; }
+function narrSave(){ try{ if(narr) localStorage.setItem(LSN, JSON.stringify(narr)); else localStorage.removeItem(LSN); }catch(e){} }
+function narrLoad(){ try{ var o = JSON.parse(localStorage.getItem(LSN) || "null"); if(o && o.session && o.items) narr = o; }catch(e){} }
+function narrLive(){ return !!(narr && (narr.state === "playing" || narr.state === "paused")); }
+function narrItem(){ return narr && narr.items[Math.min(narr.index || 0, narr.items.length - 1)]; }
+function narrFor(kind, t){ return !!(narr && narr.kind === kind && (!t || narr.t === t)); }
+function narrRoute(){
+  if(!narr) return { v:"home" };
+  var t = topicById(narr.t);
+  if(narr.kind === "chapter") return { v:"read", d:t ? t._div.id : "", t:narr.t, i:(narrItem() || {}).g || 0 };
+  return { v:"drill", d:t ? t._div.id : "", t:narr.t, mode:narr.mode };
+}
+function narrFirst(g){ for(var k=0;k<narr.items.length;k++) if(narr.items[k].g >= g) return k; return narr.items.length - 1; }
+function narrStart(meta, items, start, title){
+  if(!NAR.available || !items.length) return;
+  narr = meta;
+  narr.session = "n" + Date.now();
+  narr.items = items.map(function(it){ return { g:it.g, r:it.role }; });
+  narr.state = "playing"; narr.index = start || 0; narr.err = ""; narr.title = title;
+  narrSave();
+  function failed(err){ if(narr){ narr.state = "error"; narr.err = String(err && err.message || err); narrSave(); render(); } }
+  try{
+    NAR.play({ items:items.map(function(it){ return { text:it.text, pause:it.pause, label:it.label }; }),
+      start:narr.index, session:narr.session, title:title, rate:prog.settings.rate || 1 }).then(onNar, failed);
+  }catch(err){ failed(err); }
+}
+function listenChapter(t, page){
+  var items = SP.chapterItems(t), start = 0;
+  for(var k=0;k<items.length;k++) if(items[k].g >= (page || 0)){ start = k; break; }
+  narrStart({ kind:"chapter", t:t.id }, items, start, t.title);
+}
+function drillCards(mode, t){
+  if(mode === "due") return dueCards().map(function(x){ return [x.t.id, x.i]; });
+  var p = tp(t.id), unknown = [], known = [];
+  (t.cards||[]).forEach(function(c, i){ ((p.known||[]).indexOf(i) >= 0 ? known : unknown).push([t.id, i]); });
+  return unknown.concat(known);
+}
+function listenDrill(mode, t){
+  var refs = drillCards(mode, t);
+  var cards = refs.map(function(r){ return topicById(r[0]).cards[r[1]]; });
+  narrStart({ kind:"drill", mode:mode, t:t ? t.id : "", refs:refs }, SP.cardItems(cards, (prog.settings.gap || 5) * 1000),
+    0, mode === "due" ? "Due cards, hands-free" : t.title + " cards");
+}
+function onNar(ev){
+  if(!narr || !ev || (ev.session && ev.session !== narr.session)) return;
+  var before = narrItem() || {}, was = narr.state;
+  if(ev.state) narr.state = ev.state;
+  if(typeof ev.index === "number" && ev.index >= 0) narr.index = Math.min(ev.index, narr.items.length - 1);
+  if(ev.error) narr.err = ev.error;
+  var now = narrItem() || {};
+  if(narr.state === "done" && narr.kind === "chapter" && !narr.marked){
+    narr.marked = true; touch(narr.t, function(p){ p.read = true; });
+  }
+  narrSave();
+  if(narr.kind === "chapter" && route.v === "read" && route.t === narr.t && now.g !== before.g && now.g !== (route.i || 0)){
+    route.i = now.g; toTop(); render(); return;
+  }
+  if(narr.state !== was) { render(); return; }
+  if(narr.kind === "drill" && route.v === "drill" && (now.g !== before.g || now.r !== before.r)) render();
+}
+function narrSync(){
+  if(!narr || !NAR.available) return;
+  NAR.state().then(function(s){
+    if(!narr) return;
+    if(s && s.session === narr.session) onNar(s);
+    else if(narrLive()){ narr.state = "stopped"; narrSave(); render(); }
+  }, function(){});
+}
+function narrCmd(cmd){
+  if(!narr) return;
+  var p = cmd === "pause" ? NAR.pause() : cmd === "resume" ? NAR.resume() : cmd === "stop" ? NAR.stop() : null;
+  if(cmd === "prev" || cmd === "next"){
+    var g = (narrItem() || {}).g || 0;
+    var target = cmd === "next" ? narrFirst(g + 1) : narrFirst(Math.max(0, g - ((narrItem() || {}).r === "q" ? 1 : 0)));
+    if(cmd === "next" && target <= narr.index) return;
+    p = NAR.seek(target);
+  }
+  if(p) p.then(onNar, function(){});
+}
+function narrErrHTML(){
+  if(!narr || narr.state !== "error") return "";
+  var why = narr.err === "no-engine" ? "No text-to-speech engine is installed on this tablet. Install one from the app store (Google's Speech Services, for example), set it as the default under Android Settings → Text-to-speech output, then try again."
+    : narr.err === "no-voice" ? "The text-to-speech engine has no English voice installed. Open its settings and download an English voice, then try again."
+    : "The narrator could not start: " + narr.err;
+  return '<div class="note"><b>Listening unavailable</b>' + esc(why) + "</div>";
+}
+function railNarr(){
+  return '<button class="btn" data-listen="stop">Stop</button>'
+    + (narr.kind === "drill" ? '<button class="btn" data-listen="prev">‹ Prev</button>' : "")
+    + '<button class="btn btn-primary" data-listen="' + (narr.state === "playing" ? "pause" : "resume") + '">' + (narr.state === "playing" ? "Pause" : "Resume") + "</button>"
+    + (narr.kind === "drill" ? '<button class="btn" data-listen="next">Next ›</button>' : "");
+}
+function vDrill(){
+  var t = topicById(route.t);
+  var mine = narr && narr.kind === "drill" && narr.mode === route.mode && (route.mode === "due" || narr.t === route.t);
+  var title = route.mode === "due" ? "Due cards" : t ? t.title : "Cards";
+  var crumb = "Hands-free drill";
+  var intro = '<p class="small muted">Reads each prompt, waits ' + (prog.settings.gap || 5) + " seconds for you to answer in your head, then reads the answer. Your review schedule is not changed — grade cards in the normal deck when you want them to count.</p>";
+  if(!mine || narr.state === "stopped" || narr.state === "error"){
+    var n = drillCards(route.mode, t).length;
+    return { title:title, crumb:crumb, html:(mine ? narrErrHTML() : "") + intro
+      + (n ? '<div class="row" style="margin-top:14px"><button class="btn btn-primary" data-listen="drill-start">Start · ' + n + " card" + (n === 1 ? "" : "s") + "</button></div>"
+        : "<p>No cards to drill right now.</p>") };
+  }
+  if(narr.state === "done"){
+    return { title:title, crumb:crumb, html:'<div class="banner"><span class="eyebrow">Drill finished</span><span class="big num">' + narr.refs.length + '</span><p class="small" style="margin:10px 0 0">cards read through.</p></div>'
+      + '<div class="row"><button class="btn btn-primary" data-listen="drill-start">Run it again</button></div>' };
+  }
+  var it = narrItem(), ref = narr.refs[it.g], c = topicById(ref[0]).cards[ref[1]];
+  var h = '<div class="pcount" style="margin-bottom:8px">Card ' + (it.g + 1) + " of " + narr.refs.length + (narr.state === "paused" ? " · paused" : "") + "</div>"
+    + '<div class="card"><span class="side">Prompt</span><span class="q">' + fmt(c.q) + "</span>"
+    + (it.r === "a" ? '<span class="a">' + fmt(c.a) + "</span>" : "") + "</div>"
+    + '<p class="tapcue">' + (it.r === "a" ? "Answer" : "Think of the answer…") + "</p>";
+  return { title:title, crumb:crumb, html:h };
+}
+
 /* ---------- back navigation (on-screen button and Android back key) ---------- */
 function goBack(){
   var v = route.v;
   if(v === "home"){ location.href = "../../index.html"; return; }
   if(v === "topic") go({ v:"div", d:route.d });
   else if(v === "read" || v === "cards") go({ v:"topic", d:route.d, t:route.t });
+  else if(v === "drill") go(route.mode === "due" ? { v:"due" } : { v:"topic", d:route.d, t:route.t });
   else if(v === "run" && run){ if(run.view !== "q"){ run.view = "q"; render(); } else go(run.back || { v:"home" }); }
   else go({ v:"home" });
 }
-/* Capacitor injects window.Capacitor into every page it serves, so the App
-   plugin is reachable from this classic-script page without a bundler. */
+/* Capacitor injects its bridge into every page it serves, but Capacitor.Plugins is only filled
+   in by @capacitor/core, which this page does not load — so listen through the raw bridge. */
 try{
-  var CapApp = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.App;
-  if(CapApp && CapApp.addListener) CapApp.addListener("backButton", function(){ goBack(); });
+  var Cap = window.Capacitor;
+  if(Cap && Cap.isNativePlatform && Cap.isNativePlatform() && Cap.addListener){
+    Cap.addListener("App", "backButton", function(){ goBack(); });
+    Cap.addListener("App", "resume", function(){ narrSync(); });
+  }
 }catch(e){}
+document.addEventListener("visibilitychange", function(){ if(!document.hidden) narrSync(); });
 
 /* ---------- events ---------- */
 document.addEventListener("click", function(e){
   var el = e.target.closest ? e.target.closest(
-    "[data-go],[data-tab],[data-page],[data-done],[data-pick],[data-multi],[data-item],[data-target],[data-check],[data-rnext],[data-rnav],[data-grade],[data-restart],[data-conf],[data-set],[data-size],[data-io],[data-mock],[data-case],[data-review],[data-again],[data-docs],[data-doc],[data-resume],[data-zone],[data-pass],[data-move],[data-seqreset],#flip,#back,#gear,#find") : null;
+    "[data-go],[data-tab],[data-page],[data-done],[data-pick],[data-multi],[data-item],[data-target],[data-check],[data-rnext],[data-rnav],[data-grade],[data-restart],[data-conf],[data-set],[data-size],[data-io],[data-mock],[data-case],[data-review],[data-again],[data-docs],[data-doc],[data-resume],[data-zone],[data-pass],[data-move],[data-seqreset],[data-listen],[data-nset],#flip,#back,#gear,#find") : null;
   if(!el) return;
 
   if(el.id === "back"){ goBack(); return; }
@@ -1457,7 +1620,26 @@ document.addEventListener("click", function(e){
     else go({ v:"div", d:route.d, tab:el.getAttribute("data-tab") });
     return;
   }
-  if(el.hasAttribute("data-page")){ route.i = parseInt(el.getAttribute("data-page"), 10); toTop(); render(); return; }
+  if(el.hasAttribute("data-page")){ route.i = parseInt(el.getAttribute("data-page"), 10);
+    if(narrFor("chapter", route.t) && narrLive()){ var pi = route.i; NAR.seek(narrFirst(pi)).then(onNar, function(){}); }
+    toTop(); render(); return; }
+  if(el.hasAttribute("data-listen")){
+    var la = el.getAttribute("data-listen");
+    if(la === "chapter"){ var lt = topicOf(route); if(lt){ listenChapter(lt, route.v === "read" ? (route.i || 0) : 0); if(route.v !== "read") go({ v:"read", d:route.d, t:route.t, i:0 }); else render(); } }
+    else if(la === "drill-start"){ listenDrill(route.mode, topicById(route.t)); render(); }
+    else if(la === "goto"){ go(narrRoute()); }
+    else narrCmd(la);
+    return;
+  }
+  if(el.hasAttribute("data-nset")){
+    var nk = el.getAttribute("data-nset"), by = parseInt(el.getAttribute("data-by"), 10);
+    if(nk === "rate"){
+      var ri = RATES.indexOf(prog.settings.rate || 1); if(ri < 0) ri = 2;
+      prog.settings.rate = RATES[Math.max(0, Math.min(RATES.length - 1, ri + by))];
+      if(NAR.available && narrLive()) NAR.setRate(prog.settings.rate).then(onNar, function(){});
+    } else prog.settings.gap = Math.max(2, Math.min(15, (prog.settings.gap || 5) + by));
+    saveLocal(); render(); return;
+  }
   if(el.getAttribute("data-done") === "read"){ touch(route.t, function(p){ p.read = true; }); go({ v:"topic", d:route.d, t:route.t }); return; }
   if(el.hasAttribute("data-conf")){
     var c = parseInt(el.getAttribute("data-conf"), 10);
@@ -1594,6 +1776,12 @@ document.addEventListener("click", function(e){
 /* ---------- boot ---------- */
 loadLocal();
 applySettings();
+narrLoad();
+if(NAR.available){
+  NAR.on(onNar);
+  NAR.check().then(function(r){ narCheck = r || { ok:true }; if(route.v === "settings") render(); }, function(){});
+  if(narr) narrSync();
+} else narr = null;
 var h0 = (location.hash || "").replace("#", "");
 if(byId[h0]) route = { v:"div", d:h0 };
 render();
