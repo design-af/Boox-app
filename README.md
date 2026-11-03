@@ -1,4 +1,4 @@
-# AFS Custom Boox Tools
+# AFS Custom Boox
 
 One Android app for the Boox Air 6C that holds a set of e-ink tools. App ID `af.design.boox`.
 Every push to `main` builds a signed APK and publishes it as the latest GitHub release; the app

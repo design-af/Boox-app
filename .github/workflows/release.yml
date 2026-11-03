@@ -51,14 +51,14 @@ jobs:
         run: |
           chmod +x gradlew
           ./gradlew assembleRelease --no-daemon
-          cp app/build/outputs/apk/release/app-release.apk "$RUNNER_TEMP/afs-boox-tools-build-${BUILD_NUMBER}.apk"
+          cp app/build/outputs/apk/release/app-release.apk "$RUNNER_TEMP/afs-custom-boox-build-${BUILD_NUMBER}.apk"
 
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "build-${BUILD_NUMBER}" \
-            "$RUNNER_TEMP/afs-boox-tools-build-${BUILD_NUMBER}.apk" \
+            "$RUNNER_TEMP/afs-custom-boox-build-${BUILD_NUMBER}.apk" \
             --title "Build ${BUILD_NUMBER}" \
             --notes "Commit ${GITHUB_SHA::7}: $(git log -1 --pretty=%s)" \
             --latest

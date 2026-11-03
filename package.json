@@ -1,7 +1,7 @@
 {
-  "name": "afs-custom-boox-tools",
+  "name": "afs-custom-boox",
   "version": "1.0.0",
-  "description": "AFS Custom Boox Tools \u2014 a hub of e-ink tools for the Boox Air 6C",
+  "description": "AFS Custom Boox \u2014 a hub of e-ink tools for the Boox Air 6C",
   "main": "index.js",
   "scripts": {
     "test": "node scripts/validate-are.mjs",
