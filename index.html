@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Boox App</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <div id="update-banner" hidden>
+      <span id="update-text"></span>
+      <button id="update-btn">Update</button>
+    </div>
+
+    <main>
+      <h1>Boox App</h1>
+      <p class="muted">Built in Claude, shipped by GitHub Actions.</p>
+
+      <section class="card">
+        <h2>Version</h2>
+        <p id="version">…</p>
+        <button id="check-btn">Check for updates</button>
+      </section>
+
+      <section class="card">
+        <h2>Start here</h2>
+        <p>Replace this screen in <code>src/main.js</code>. Every push to <code>main</code> builds a new signed APK.</p>
+      </section>
+    </main>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

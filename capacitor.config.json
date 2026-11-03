@@ -1,0 +1,8 @@
+{
+  "appId": "af.design.boox",
+  "appName": "Boox App",
+  "webDir": "dist",
+  "android": {
+    "backgroundColor": "#ffffff"
+  }
+}
