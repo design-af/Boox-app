@@ -64,9 +64,20 @@ html,body{height:100%}
 body{
   margin:0;background:var(--paper);color:var(--ink);
   display:flex;flex-direction:column;height:100vh;height:100dvh;overflow:hidden;
-  font-family:var(--serif);font-size:var(--fs);line-height:1.65;
+  font-family:var(--body-font,var(--serif));font-weight:var(--body-weight,400);
+  font-size:var(--fs);line-height:1.65;
+  -webkit-text-stroke:var(--stroke,0px) currentColor;
   -webkit-text-size-adjust:100%;
 }
+/* E-ink: lift the smallest labels, which fall below comfortable size on a 300 ppi panel. */
+:root[data-eink="on"] .eyebrow,:root[data-eink="on"] .card .side{font-size:.78em}
+:root[data-eink="on"] .dmeta .sub,:root[data-eink="on"] .pcount,:root[data-eink="on"] .tapcue,
+:root[data-eink="on"] .fig figcaption,:root[data-eink="on"] .vlist .vtags,:root[data-eink="on"] .note b{font-size:.86em}
+.rt{border:var(--bw2) solid var(--rule-hard);border-radius:var(--rad);padding:12px 14px;margin:12px 0}
+.rt[data-on="1"]{border-color:var(--ink);border-width:3px}
+.rt .rth{display:flex;justify-content:space-between;align-items:center;gap:8px;font-family:var(--sans);font-size:.8em;
+  -webkit-text-stroke:0;font-weight:600;margin-bottom:6px}
+.rt p{margin:0 0 6px}
 .wrap{width:100%;max-width:var(--measure);margin:0 auto;
   padding-left:max(16px,env(safe-area-inset-left,0px));
   padding-right:max(16px,env(safe-area-inset-right,0px))}
@@ -1269,7 +1280,11 @@ function vSettings(){
     + '<div class="kv"><span><b>E-ink mode</b><br><span class="small muted">Pure black on white, solid rules, no grey. Turn this on for the Boox.</span></span>'
     + '<button class="btn btn-sm" data-set="eink">' + (s.eink ? "On" : "Off") + "</button></div>"
     + '<div class="kv"><span><b>Text size</b></span><span class="row" style="flex-wrap:nowrap">'
+    + '<span class="small muted num" style="align-self:center">' + SIZES[Math.max(0, Math.min(SIZES.length - 1, s.size))] + 'px</span>'
     + '<button class="btn btn-sm" data-size="-1">A−</button><button class="btn btn-sm" data-size="1">A+</button></span></div>'
+    + '<div class="kv"><span><b>Typeface</b></span><button class="btn btn-sm" data-type="face">' + ((s.face || "serif") === "sans" ? "Sans" : "Serif") + "</button></div>"
+    + '<div class="kv"><span><b>Text weight</b></span><button class="btn btn-sm" data-type="weight">' + WEIGHTS[s.weight || 0] + "</button></div>"
+    + '<div class="kv"><span><b>Readability test</b><br><span class="small muted">Compare typefaces and weights side by side on this screen.</span></span><button class="btn btn-sm" data-go=\'{"v":"readtest"}\'>Open</button></div>'
     + '<div class="kv"><span><b>Theme</b><br><span class="small muted">Ignored while e-ink mode is on.</span></span>'
     + '<button class="btn btn-sm" data-set="theme">' + esc(s.theme) + "</button></div>";
 
@@ -1315,6 +1330,7 @@ function render(){
   else if(v === "cards") out = vCards();
   else if(v === "drill") out = vDrill();
   else if(v === "voices") out = vVoices();
+  else if(v === "readtest") out = vReadTest();
   else if(v === "due") out = vDue();
   else if(v === "review") out = vReview();
   else if(v === "run") out = vRun();
@@ -1413,11 +1429,23 @@ function railBase(){
   return '<button class="btn" data-go=\'{"v":"home"}\'>ARE Prep home</button>';
 }
 
+var SIZES = [16, 18, 20, 23, 26, 30];
+/* Body type: serif (Spectral) or sans (IBM Plex Sans), three weights. "Heavier" thickens every
+   glyph slightly with a text stroke, which also firms up the thin hairlines that e-ink loses. */
+function typeStyle(face, w){
+  var sans = face === "sans";
+  return { font: sans ? "var(--sans)" : "var(--serif)",
+    weight: String(w === 2 ? 600 : (w === 1 && sans) ? 500 : 400),
+    stroke: w === 0 ? "0px" : "0.25px" };
+}
+var WEIGHTS = ["Regular", "Heavier", "Bold"];
 function applySettings(){
   var s = prog.settings, r = document.documentElement;
   if(s.eink) r.setAttribute("data-eink", "on"); else r.removeAttribute("data-eink");
   if(s.theme === "light" || s.theme === "dark") r.setAttribute("data-theme", s.theme); else r.removeAttribute("data-theme");
-  r.style.setProperty("--fs", [16,18,20,23][Math.max(0, Math.min(3, s.size))] + "px");
+  r.style.setProperty("--fs", SIZES[Math.max(0, Math.min(SIZES.length - 1, s.size))] + "px");
+  var ty = typeStyle(s.face || "serif", s.weight || 0);
+  r.style.setProperty("--body-font", ty.font); r.style.setProperty("--body-weight", ty.weight); r.style.setProperty("--stroke", ty.stroke);
 }
 
 /* ---------- starting runs ---------- */
@@ -1592,6 +1620,30 @@ function vDrill(){
   return { title:title, crumb:crumb, html:h };
 }
 
+/* ---------- readability test ---------- */
+function vReadTest(){
+  var s = prog.settings, fs = SIZES[Math.max(0, Math.min(SIZES.length - 1, s.size))];
+  var dpr = window.devicePixelRatio || 1, pt = fs * dpr / 300 * 72;
+  var t = DIVS[0].topics[0], b = (t.read || [])[0] || {}, para = (b.p || [])[0] || t.summary;
+  var h = '<p class="small muted">Each box shows the same passage at your current text size (' + fs + "px). Read them at your normal distance, in your usual light, and tap <b>Use</b> on the one that reads most easily. Change the size with A− / A+.</p>"
+    + '<div class="row" style="align-items:center"><button class="btn btn-sm" data-size="-1">A−</button><button class="btn btn-sm" data-size="1">A+</button>'
+    + '<span class="small muted num">Screen ' + window.innerWidth + "×" + window.innerHeight + " at " + dpr.toFixed(2) + "× · body text ≈ " + pt.toFixed(1) + " pt on a 300 ppi panel (a printed book is about 10–12 pt)</span></div>";
+  var n = 0;
+  ["serif", "sans"].forEach(function(face){
+    [0, 1, 2].forEach(function(w){
+      n++;
+      var ty = typeStyle(face, w), on = (s.face || "serif") === face && (s.weight || 0) === w;
+      var st = "font-family:" + ty.font + ";font-weight:" + ty.weight + ";-webkit-text-stroke:" + ty.stroke + " currentColor";
+      h += '<div class="rt" data-on="' + (on ? 1 : 0) + '"><div class="rth"><span>' + n + " · " + (face === "sans" ? "Sans" : "Serif") + " · " + WEIGHTS[w] + (on ? " (current)" : "") + "</span>"
+        + '<button class="btn btn-sm' + (on ? " btn-primary" : "") + '" data-type="pick" data-face="' + face + '" data-w="' + w + '">' + (on ? "✓ In use" : "Use") + "</button></div>"
+        + '<div style="' + st + '"><p>' + fmt(para) + "</p>"
+        + '<p class="small" style="margin:0">B101 · A201 §4.2 · 1½ hr · 16–18″ · ±10–15% · R-13 · Type V-B</p>'
+        + '<span class="eyebrow">Small label · 12 of 40 recalled</span></div></div>';
+    });
+  });
+  return { title:"Readability test", crumb:"Settings · Display", html:h };
+}
+
 /* ---------- voice picker ---------- */
 var voiceInfo = null, voiceLoading = false;
 var SAMPLE = "Under B101, the architect does not warrant the cost estimate. A 2-hour fire barrier takes a 1½ hr door, and a ramp may be no steeper than 1:12.";
@@ -1669,6 +1721,7 @@ function goBack(){
   if(v === "topic") go({ v:"div", d:route.d });
   else if(v === "read" || v === "cards") go({ v:"topic", d:route.d, t:route.t });
   else if(v === "drill") go(route.mode === "due" ? { v:"due" } : { v:"topic", d:route.d, t:route.t });
+  else if(v === "readtest") go({ v:"settings" });
   else if(v === "voices"){ if(NAR.available) NAR.stopPreview().catch(function(){}); go({ v:"settings" }); }
   else if(v === "run" && run){ if(run.view !== "q"){ run.view = "q"; render(); } else go(run.back || { v:"home" }); }
   else go({ v:"home" });
@@ -1687,7 +1740,7 @@ document.addEventListener("visibilitychange", function(){ if(!document.hidden) n
 /* ---------- events ---------- */
 document.addEventListener("click", function(e){
   var el = e.target.closest ? e.target.closest(
-    "[data-go],[data-tab],[data-page],[data-done],[data-pick],[data-multi],[data-item],[data-target],[data-check],[data-rnext],[data-rnav],[data-grade],[data-restart],[data-conf],[data-set],[data-size],[data-io],[data-mock],[data-case],[data-review],[data-again],[data-docs],[data-doc],[data-resume],[data-zone],[data-pass],[data-move],[data-seqreset],[data-listen],[data-nset],[data-voice],#flip,#back,#gear,#find") : null;
+    "[data-go],[data-tab],[data-page],[data-done],[data-pick],[data-multi],[data-item],[data-target],[data-check],[data-rnext],[data-rnav],[data-grade],[data-restart],[data-conf],[data-set],[data-size],[data-io],[data-mock],[data-case],[data-review],[data-again],[data-docs],[data-doc],[data-resume],[data-zone],[data-pass],[data-move],[data-seqreset],[data-listen],[data-nset],[data-voice],[data-type],#flip,#back,#gear,#find") : null;
   if(!el) return;
 
   if(el.id === "back"){ goBack(); return; }
@@ -1737,6 +1790,13 @@ document.addEventListener("click", function(e){
     else if(la === "here"){ var hi = narrFirst(route.i || 0); var hp = narr.state === "playing" ? NAR.seek(hi) : NAR.seek(hi).then(function(){ return NAR.resume(); }); hp.then(onNar, function(){}); }
     else narrCmd(la);
     return;
+  }
+  if(el.hasAttribute("data-type")){
+    var tk = el.getAttribute("data-type");
+    if(tk === "face") prog.settings.face = (prog.settings.face || "serif") === "sans" ? "serif" : "sans";
+    if(tk === "weight") prog.settings.weight = ((prog.settings.weight || 0) + 1) % 3;
+    if(tk === "pick"){ prog.settings.face = el.getAttribute("data-face"); prog.settings.weight = parseInt(el.getAttribute("data-w"), 10); }
+    saveLocal(); applySettings(); render(); return;
   }
   if(el.hasAttribute("data-voice")){
     var va = el.getAttribute("data-voice"), vn = el.getAttribute("data-name") || "";
@@ -1865,8 +1925,8 @@ document.addEventListener("click", function(e){
     saveLocal(); applySettings(); render(); return;
   }
   if(el.hasAttribute("data-size")){
-    prog.settings.size = Math.max(0, Math.min(3, (prog.settings.size||1) + parseInt(el.getAttribute("data-size"), 10)));
-    saveLocal(); applySettings(); return;
+    prog.settings.size = Math.max(0, Math.min(SIZES.length - 1, (prog.settings.size == null ? 1 : prog.settings.size) + parseInt(el.getAttribute("data-size"), 10)));
+    saveLocal(); applySettings(); if(route.v === "settings" || route.v === "readtest") render(); return;
   }
   if(el.hasAttribute("data-io")){
     var act = el.getAttribute("data-io"), box = document.getElementById("io"), msg = document.getElementById("iomsg");
