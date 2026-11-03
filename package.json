@@ -4,7 +4,7 @@
   "description": "AFS Custom Boox \u2014 a hub of e-ink tools for the Boox Air 6C",
   "main": "index.js",
   "scripts": {
-    "test": "node scripts/validate-are.mjs",
+    "test": "node scripts/validate-are.mjs && node scripts/validate-templates.mjs",
     "build": "vite build",
     "dev": "vite",
     "sync": "npm test && vite build && cap sync android"

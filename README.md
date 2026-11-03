@@ -41,3 +41,6 @@ hands-free card drill keep playing with the screen off. It needs a TTS engine in
 
 The signing key (GitHub secrets `ANDROID_KEYSTORE_*`), the `applicationId`, or the
 `versionCode = run number` rule. Changing any of them breaks in-place updates.
+
+## Template Maker
+Note backgrounds with the notebook name on every page. See `docs/TEMPLATE-MAKER.md`.
