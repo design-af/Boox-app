@@ -17,6 +17,7 @@ import android.os.Looper;
 import android.os.PowerManager;
 import android.speech.tts.TextToSpeech;
 import android.speech.tts.UtteranceProgressListener;
+import android.speech.tts.Voice;
 
 import androidx.core.app.NotificationCompat;
 import androidx.core.app.ServiceCompat;
@@ -55,13 +56,15 @@ public class NarrationService extends Service {
     static String session = "", title = "Narration", state = "stopped", error = "";
     static int index = 0;
     static float rate = 1.0f;
+    static String voiceName = "", enginePkg = "";
     static Listener listener;
     static NarrationService instance;
 
     private final Handler main = new Handler(Looper.getMainLooper());
     private TextToSpeech tts;
     private boolean ready = false, pendingPlay = false;
-    private int gen = 0;
+    private int gen = 0, ttsToken = 0;
+    private String currentEngine = null;
     private PowerManager.WakeLock wake;
 
     static void send(Context ctx, String action) {
@@ -81,7 +84,34 @@ public class NarrationService extends Service {
         PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
         wake = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "AFSBoox:narration");
         wake.setReferenceCounted(false);
-        tts = new TextToSpeech(getApplicationContext(), status -> main.post(() -> onTtsInit(status)));
+        initTts();
+    }
+
+    private void initTts() {
+        ready = false;
+        if (tts != null) { try { tts.shutdown(); } catch (Exception ignored) { } }
+        final int token = ++ttsToken;
+        currentEngine = enginePkg;
+        tts = new TextToSpeech(getApplicationContext(),
+                status -> main.post(() -> { if (token == ttsToken) onTtsInit(status); }),
+                enginePkg.isEmpty() ? null : enginePkg);
+    }
+
+    /** Use the chosen voice if this engine has it, otherwise US English, otherwise the device language. */
+    private boolean applyVoice() {
+        if (!voiceName.isEmpty()) {
+            try {
+                for (Voice v : tts.getVoices()) {
+                    if (voiceName.equals(v.getName())) { tts.setVoice(v); return true; }
+                }
+            } catch (Exception ignored) { }
+        }
+        int lang = tts.setLanguage(Locale.US);
+        if (lang == TextToSpeech.LANG_MISSING_DATA || lang == TextToSpeech.LANG_NOT_SUPPORTED) {
+            lang = tts.setLanguage(Locale.getDefault());
+            return !(lang == TextToSpeech.LANG_MISSING_DATA || lang == TextToSpeech.LANG_NOT_SUPPORTED);
+        }
+        return true;
     }
 
     private void onTtsInit(int status) {
@@ -89,13 +119,9 @@ public class NarrationService extends Service {
             fail("no-engine");
             return;
         }
-        int lang = tts.setLanguage(Locale.US);
-        if (lang == TextToSpeech.LANG_MISSING_DATA || lang == TextToSpeech.LANG_NOT_SUPPORTED) {
-            lang = tts.setLanguage(Locale.getDefault());
-            if (lang == TextToSpeech.LANG_MISSING_DATA || lang == TextToSpeech.LANG_NOT_SUPPORTED) {
-                fail("no-voice");
-                return;
-            }
+        if (!applyVoice()) {
+            fail("no-voice");
+            return;
         }
         tts.setAudioAttributes(new AudioAttributes.Builder()
                 .setUsage(AudioAttributes.USAGE_MEDIA)
@@ -129,7 +155,9 @@ public class NarrationService extends Service {
         switch (action) {
             case ACTION_PLAY:
                 error = "";
-                if (ready) playFrom(index); else pendingPlay = true;
+                if (!enginePkg.equals(currentEngine)) { pendingPlay = true; initTts(); }
+                else if (ready) { applyVoice(); playFrom(index); }
+                else pendingPlay = true;
                 break;
             case ACTION_PAUSE: pause(); break;
             case ACTION_RESUME: resume(); break;

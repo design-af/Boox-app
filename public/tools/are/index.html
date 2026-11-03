@@ -182,6 +182,11 @@ tbody tr:last-child td{border-bottom:0}
 .card .side{font-family:var(--sans);font-size:.68em;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-2);margin-bottom:10px}
 .card .q{font-size:1.08em;font-weight:600;font-family:var(--sans);line-height:1.45}
 .card .a{margin-top:14px;padding-top:14px;border-top:var(--bw) solid var(--rule)}
+/* read-aloud: the passage being spoken. Outline only, so nothing reflows on e-ink. */
+.read .speaking{outline:2px solid var(--ink);outline-offset:4px;border-radius:2px;background:var(--paper-2)}
+.vlist .kv{gap:10px}
+.vlist .vname{font-family:var(--sans);font-weight:600}
+.vlist .vtags{display:block;font-family:var(--sans);font-size:.72em;color:var(--ink-2);margin-top:2px}
 .tapcue{text-align:center;font-family:var(--sans);font-size:.78em;color:var(--ink-2);margin-top:10px}
 .srsrow{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:6px;margin-top:14px}
 .srsrow .btn{padding:8px 4px;text-align:center}
@@ -555,16 +560,18 @@ function tableHTML(t){
 function figHTML(f){
   return '<figure class="fig">' + f.svg + (f.caption ? "<figcaption>" + fmt(f.caption) + "</figcaption>" : "") + "</figure>";
 }
-function blockHTML(b){
+/* keyed: tag each readable element so read-aloud can highlight it (keys match speech.js) */
+function blockHTML(b, keyed){
+  function k(id){ return keyed ? ' data-sk="' + id + '"' : ""; }
   var h = "";
-  if(b.h) h += "<h3>" + fmt(b.h) + "</h3>";
-  (b.p||[]).forEach(function(x){ h += "<p>" + fmt(x) + "</p>"; });
+  if(b.h) h += "<h3" + k("h") + ">" + fmt(b.h) + "</h3>";
+  (b.p||[]).forEach(function(x, i){ h += "<p" + k("p" + i) + ">" + fmt(x) + "</p>"; });
   if(b.svg) h += figHTML(b);
-  if(b.ul) h += "<ul>" + b.ul.map(function(x){ return "<li>" + fmt(x) + "</li>"; }).join("") + "</ul>";
-  if(b.ol) h += "<ol>" + b.ol.map(function(x){ return "<li>" + fmt(x) + "</li>"; }).join("") + "</ol>";
-  if(b.table) h += tableHTML(b.table);
-  (b.p2||[]).forEach(function(x){ h += "<p>" + fmt(x) + "</p>"; });
-  if(b.note) h += '<div class="note"><b>' + fmt(b.noteTitle || "Exam tip") + "</b>" + fmt(b.note) + "</div>";
+  if(b.ul) h += "<ul>" + b.ul.map(function(x, i){ return "<li" + k("u" + i) + ">" + fmt(x) + "</li>"; }).join("") + "</ul>";
+  if(b.ol) h += "<ol>" + b.ol.map(function(x, i){ return "<li" + k("o" + i) + ">" + fmt(x) + "</li>"; }).join("") + "</ol>";
+  if(b.table) h += keyed ? "<div" + k("t") + ">" + tableHTML(b.table) + "</div>" : tableHTML(b.table);
+  (b.p2||[]).forEach(function(x, i){ h += "<p" + k("q" + i) + ">" + fmt(x) + "</p>"; });
+  if(b.note) h += '<div class="note"' + k("n") + "><b>" + fmt(b.noteTitle || "Exam tip") + "</b>" + fmt(b.note) + "</div>";
   return h;
 }
 function sheetHTML(r){
@@ -1024,7 +1031,7 @@ function rowBtn(v, t, label, sub){
 function vRead(){
   var t = topicOf(route); if(!t) return vDiv();
   var blocks = t.read || [], i = Math.min(route.i || 0, blocks.length - 1);
-  var h = (narrFor("chapter", t.id) ? narrErrHTML() : "") + '<div class="read">' + blockHTML(blocks[i]);
+  var h = (narrFor("chapter", t.id) ? narrErrHTML() : "") + '<div class="read">' + blockHTML(blocks[i], true);
   (FIGS[t.id] || []).forEach(function(f){ if(f.after === i) h += figHTML(f); });
   h += "</div>";
   h += '<div class="pager"><button class="btn btn-sm" data-page="' + (i-1) + '"' + (i === 0 ? " disabled" : "") + ">← Back</button>"
@@ -1257,6 +1264,7 @@ function vSearch(){
 /* ---------- settings ---------- */
 function vSettings(){
   var s = prog.settings;
+  if(NAR.available && !voiceInfo && s.voice) loadVoices();
   var h = '<h3 style="margin-bottom:10px">Display</h3>'
     + '<div class="kv"><span><b>E-ink mode</b><br><span class="small muted">Pure black on white, solid rules, no grey. Turn this on for the Boox.</span></span>'
     + '<button class="btn btn-sm" data-set="eink">' + (s.eink ? "On" : "Off") + "</button></div>"
@@ -1274,7 +1282,8 @@ function vSettings(){
       + '<button class="btn btn-sm" data-nset="rate" data-by="1">+</button></span></div>'
       + '<div class="kv"><span><b>Think time</b><br><span class="small muted">Gap between a card\'s prompt and its answer in the hands-free drill.</span></span><span class="row" style="flex-wrap:nowrap;align-items:center">'
       + '<button class="btn btn-sm" data-nset="gap" data-by="-1">−</button><span class="num" style="min-width:3.2em;text-align:center">' + (prog.settings.gap || 5) + " s</span>"
-      + '<button class="btn btn-sm" data-nset="gap" data-by="1">+</button></span></div>';
+      + '<button class="btn btn-sm" data-nset="gap" data-by="1">+</button></span></div>'
+      + '<div class="kv"><span><b>Voice</b><br><span class="small muted">' + esc(voiceName()) + '</span></span><button class="btn btn-sm" data-go=\'{"v":"voices"}\'>Choose…</button></div>';
     if(NAR.engine === "native"){
       h += narCheck.ok ? '<p class="small muted">Uses the tablet\'s text-to-speech engine and keeps reading with the screen off. If the Boox stops it after a while, allow AFS Custom Boox to run in the background in the Boox app-management / battery settings (turn off freezing for this app).</p>'
         : '<div class="note"><b>No speech engine</b>No text-to-speech engine is installed on this tablet. Install one from the app store (Google\'s Speech Services, for example), set it as the default under Android Settings → Text-to-speech output, then come back.</div>';
@@ -1305,6 +1314,7 @@ function render(){
   else if(v === "read") out = vRead();
   else if(v === "cards") out = vCards();
   else if(v === "drill") out = vDrill();
+  else if(v === "voices") out = vVoices();
   else if(v === "due") out = vDue();
   else if(v === "review") out = vReview();
   else if(v === "run") out = vRun();
@@ -1321,6 +1331,7 @@ function render(){
   document.getElementById("back").hidden = (v === "home");
   document.getElementById("hub").hidden = (v !== "home");
   document.getElementById("rail").innerHTML = railFor();
+  if(v === "read") narrMark();
 
   if(v === "run" && run && !run.done && run.view === "q"){
     var it = run.items[run.i];
@@ -1358,7 +1369,15 @@ function render(){
 function railFor(){
   var v = route.v;
   var here = narr && ((v === "read" && narrFor("chapter", route.t)) || (v === "drill" && narr.kind === "drill" && narr.mode === route.mode && (route.mode === "due" || narr.t === route.t)));
-  if(here && narrLive()) return railNarr();
+  if(here && narrLive()){
+    var cg = (narrItem() || {}).g || 0;
+    if(v === "read" && (route.i || 0) !== cg)
+      return '<button class="btn" data-listen="stop">Stop</button>'
+        + '<button class="btn" data-listen="' + (narr.state === "playing" ? "pause" : "resume") + '">' + (narr.state === "playing" ? "Pause" : "Resume") + "</button>"
+        + '<button class="btn" data-listen="here">Read this page</button>'
+        + '<button class="btn btn-primary" data-listen="jump">↩ Page ' + (cg + 1) + "</button>";
+    return railNarr();
+  }
   var np = narrLive() && v !== "run" ? '<button class="btn" data-listen="goto">' + (narr.state === "playing" ? "♪ Now playing" : "♪ Paused") + "</button>" : "";
   return np + railBase();
 }
@@ -1457,13 +1476,14 @@ function narrStart(meta, items, start, title){
   if(!NAR.available || !items.length) return;
   narr = meta;
   narr.session = "n" + Date.now();
-  narr.items = items.map(function(it){ return { g:it.g, r:it.role }; });
+  narr.items = items.map(function(it){ return { g:it.g, r:it.role, k:it.key || "" }; });
   narr.state = "playing"; narr.index = start || 0; narr.err = ""; narr.title = title;
   narrSave();
   function failed(err){ if(narr){ narr.state = "error"; narr.err = String(err && err.message || err); narrSave(); render(); } }
   try{
     NAR.play({ items:items.map(function(it){ return { text:it.text, pause:it.pause, label:it.label }; }),
-      start:narr.index, session:narr.session, title:title, rate:prog.settings.rate || 1 }).then(onNar, failed);
+      start:narr.index, session:narr.session, title:title, rate:prog.settings.rate || 1,
+      voice:prog.settings.voice || "", engine:prog.settings.ttsEngine || "" }).then(onNar, failed);
   }catch(err){ failed(err); }
 }
 function listenChapter(t, page){
@@ -1494,11 +1514,27 @@ function onNar(ev){
     narr.marked = true; touch(narr.t, function(p){ p.read = true; });
   }
   narrSave();
-  if(narr.kind === "chapter" && route.v === "read" && route.t === narr.t && now.g !== before.g && now.g !== (route.i || 0)){
+  /* Turn the page with the reading, but only if you were on the page being read — if you have
+     browsed ahead or back, stay put and offer a button to jump to it instead. */
+  var onIt = narr.kind === "chapter" && route.v === "read" && route.t === narr.t;
+  if(onIt && now.g !== before.g && (route.i || 0) === before.g && now.g !== (route.i || 0)){
     route.i = now.g; toTop(); render(); return;
   }
   if(narr.state !== was) { render(); return; }
-  if(narr.kind === "drill" && route.v === "drill" && (now.g !== before.g || now.r !== before.r)) render();
+  if(onIt && now.g !== before.g) { document.getElementById("rail").innerHTML = railFor(); }
+  if(narr.kind === "drill" && route.v === "drill" && (now.g !== before.g || now.r !== before.r)) { render(); return; }
+  narrMark();
+}
+function narrMark(){
+  var old = document.querySelectorAll(".read .speaking");
+  var it = narrItem(), el = null;
+  if(narr && narr.kind === "chapter" && narrLive() && route.v === "read" && route.t === narr.t && it && it.g === (route.i || 0) && it.k)
+    el = document.querySelector('.read [data-sk="' + it.k + '"]');
+  for(var i=0;i<old.length;i++) if(old[i] !== el) old[i].classList.remove("speaking");
+  if(!el || el.classList.contains("speaking")) return;
+  el.classList.add("speaking");
+  var m = document.querySelector("main"), r = el.getBoundingClientRect(), mr = m.getBoundingClientRect();
+  if(r.top < mr.top || r.bottom > mr.bottom) m.scrollTop += r.top - mr.top - 24;
 }
 function narrSync(){
   if(!narr || !NAR.available) return;
@@ -1556,6 +1592,76 @@ function vDrill(){
   return { title:title, crumb:crumb, html:h };
 }
 
+/* ---------- voice picker ---------- */
+var voiceInfo = null, voiceLoading = false;
+var SAMPLE = "Under B101, the architect does not warrant the cost estimate. A 2-hour fire barrier takes a 1½ hr door, and a ramp may be no steeper than 1:12.";
+function voiceLabel(v){
+  var m = /-x-([a-z]{3})-/.exec(v.name || "");
+  return m ? "Voice " + m[1].toUpperCase() : (v.label || v.name);
+}
+function voiceTags(v){
+  var t = [];
+  t.push(v.network ? "needs internet" : "on device");
+  if(v.quality >= 500) t.push("very high quality"); else if(v.quality >= 400) t.push("high quality");
+  if(!v.installed) t.push("not downloaded yet");
+  return t.join(" · ");
+}
+function voiceName(){
+  var n = prog.settings.voice;
+  if(!n) return "System default";
+  var v = voiceInfo && voiceInfo.voices.filter(function(x){ return x.name === n; })[0];
+  return v ? voiceLabel(v) + " · " + v.localeLabel : n;
+}
+function loadVoices(){
+  if(voiceLoading || !NAR.available) return;
+  voiceLoading = true;
+  NAR.voices(prog.settings.ttsEngine || "").then(function(r){ voiceInfo = r || { voices:[], engines:[] }; voiceLoading = false; if(route.v === "voices" || route.v === "settings") render(); },
+    function(){ voiceInfo = { ok:false, voices:[], engines:[] }; voiceLoading = false; if(route.v === "voices") render(); });
+}
+function vVoices(){
+  if(!voiceInfo){ loadVoices(); return { title:"Voice", crumb:"Settings", html:'<p class="muted">Looking for voices…</p>' }; }
+  var s = prog.settings, h = "";
+  h += '<p class="small muted">Tap <b>Try</b> to hear a sample read at your current speed, then <b>Use</b> to pick it. Voices marked “needs internet” stop when the tablet is offline.</p>';
+  if(NAR.engine === "native"){
+    var cur = s.ttsEngine || voiceInfo.defaultEngine || "";
+    if((voiceInfo.engines || []).length){
+      h += '<h3 style="margin:18px 0 8px">Speech engine</h3><div class="row">';
+      voiceInfo.engines.forEach(function(e){
+        h += '<button class="btn btn-sm' + (e.name === cur ? " btn-primary" : "") + '" data-voice="engine" data-name="' + esc(e.name) + '">' + esc(e.label) + "</button>";
+      });
+      h += "</div>";
+    }
+    h += '<div class="row" style="margin-top:10px"><button class="btn btn-sm" data-voice="settings">Android speech settings</button>'
+      + '<button class="btn btn-sm" data-voice="reload">Refresh list</button></div>'
+      + '<p class="small muted" style="margin-top:6px">Install another engine from the app store and it appears here. Use Android speech settings to download voice data.</p>';
+  }
+  var list = (voiceInfo.voices || []).slice().sort(function(a, b){
+    return (b.installed - a.installed) || (a.network - b.network) || (b.quality - a.quality) || voiceLabel(a).localeCompare(voiceLabel(b));
+  });
+  var order = ["en-US", "en-GB"], groups = {}, keys = [];
+  list.forEach(function(v){ var g = v.localeLabel || v.locale; if(!groups[g]){ groups[g] = []; keys.push(g); } groups[g].push(v); });
+  keys.sort(function(a, b){
+    function rank(k){ var v = groups[k][0], i = order.indexOf(v.locale); return i < 0 ? 9 : i; }
+    return rank(a) - rank(b) || a.localeCompare(b);
+  });
+  h += '<div class="vlist">';
+  h += '<h3 style="margin:22px 0 6px">Default</h3><div class="kv"><span><span class="vname">System default</span><span class="vtags">whatever the engine is set to use</span></span>'
+    + '<span class="row" style="flex-wrap:nowrap"><button class="btn btn-sm" data-voice="try" data-name="">▶ Try</button>'
+    + '<button class="btn btn-sm' + (!s.voice ? " btn-primary" : "") + '" data-voice="use" data-name="">' + (!s.voice ? "✓ In use" : "Use") + "</button></span></div>";
+  if(!list.length) h += '<p class="small muted" style="margin-top:14px">This engine did not report any English voices.</p>';
+  keys.forEach(function(k){
+    h += '<h3 style="margin:22px 0 6px">' + esc(k) + "</h3>";
+    groups[k].forEach(function(v){
+      var on = s.voice === v.name;
+      h += '<div class="kv"><span><span class="vname">' + esc(voiceLabel(v)) + '</span><span class="vtags">' + esc(voiceTags(v)) + "</span></span>"
+        + '<span class="row" style="flex-wrap:nowrap"><button class="btn btn-sm" data-voice="try" data-name="' + esc(v.name) + '">▶ Try</button>'
+        + '<button class="btn btn-sm' + (on ? " btn-primary" : "") + '" data-voice="use" data-name="' + esc(v.name) + '">' + (on ? "✓ In use" : "Use") + "</button></span></div>";
+    });
+  });
+  h += "</div>";
+  return { title:"Voice", crumb:"Settings · Listening", html:h };
+}
+
 /* ---------- back navigation (on-screen button and Android back key) ---------- */
 function goBack(){
   var v = route.v;
@@ -1563,6 +1669,7 @@ function goBack(){
   if(v === "topic") go({ v:"div", d:route.d });
   else if(v === "read" || v === "cards") go({ v:"topic", d:route.d, t:route.t });
   else if(v === "drill") go(route.mode === "due" ? { v:"due" } : { v:"topic", d:route.d, t:route.t });
+  else if(v === "voices"){ if(NAR.available) NAR.stopPreview().catch(function(){}); go({ v:"settings" }); }
   else if(v === "run" && run){ if(run.view !== "q"){ run.view = "q"; render(); } else go(run.back || { v:"home" }); }
   else go({ v:"home" });
 }
@@ -1580,7 +1687,7 @@ document.addEventListener("visibilitychange", function(){ if(!document.hidden) n
 /* ---------- events ---------- */
 document.addEventListener("click", function(e){
   var el = e.target.closest ? e.target.closest(
-    "[data-go],[data-tab],[data-page],[data-done],[data-pick],[data-multi],[data-item],[data-target],[data-check],[data-rnext],[data-rnav],[data-grade],[data-restart],[data-conf],[data-set],[data-size],[data-io],[data-mock],[data-case],[data-review],[data-again],[data-docs],[data-doc],[data-resume],[data-zone],[data-pass],[data-move],[data-seqreset],[data-listen],[data-nset],#flip,#back,#gear,#find") : null;
+    "[data-go],[data-tab],[data-page],[data-done],[data-pick],[data-multi],[data-item],[data-target],[data-check],[data-rnext],[data-rnav],[data-grade],[data-restart],[data-conf],[data-set],[data-size],[data-io],[data-mock],[data-case],[data-review],[data-again],[data-docs],[data-doc],[data-resume],[data-zone],[data-pass],[data-move],[data-seqreset],[data-listen],[data-nset],[data-voice],#flip,#back,#gear,#find") : null;
   if(!el) return;
 
   if(el.id === "back"){ goBack(); return; }
@@ -1620,15 +1727,24 @@ document.addEventListener("click", function(e){
     else go({ v:"div", d:route.d, tab:el.getAttribute("data-tab") });
     return;
   }
-  if(el.hasAttribute("data-page")){ route.i = parseInt(el.getAttribute("data-page"), 10);
-    if(narrFor("chapter", route.t) && narrLive()){ var pi = route.i; NAR.seek(narrFirst(pi)).then(onNar, function(){}); }
-    toTop(); render(); return; }
+  if(el.hasAttribute("data-page")){ route.i = parseInt(el.getAttribute("data-page"), 10); toTop(); render(); return; }
   if(el.hasAttribute("data-listen")){
     var la = el.getAttribute("data-listen");
     if(la === "chapter"){ var lt = topicOf(route); if(lt){ listenChapter(lt, route.v === "read" ? (route.i || 0) : 0); if(route.v !== "read") go({ v:"read", d:route.d, t:route.t, i:0 }); else render(); } }
     else if(la === "drill-start"){ listenDrill(route.mode, topicById(route.t)); render(); }
     else if(la === "goto"){ go(narrRoute()); }
+    else if(la === "jump"){ route.i = (narrItem() || {}).g || 0; toTop(); render(); }
+    else if(la === "here"){ var hi = narrFirst(route.i || 0); var hp = narr.state === "playing" ? NAR.seek(hi) : NAR.seek(hi).then(function(){ return NAR.resume(); }); hp.then(onNar, function(){}); }
     else narrCmd(la);
+    return;
+  }
+  if(el.hasAttribute("data-voice")){
+    var va = el.getAttribute("data-voice"), vn = el.getAttribute("data-name") || "";
+    if(va === "try") NAR.preview({ text:SP.speak(SAMPLE), voice:vn, engine:prog.settings.ttsEngine || "", rate:prog.settings.rate || 1 }).catch(function(){});
+    if(va === "use"){ prog.settings.voice = vn; saveLocal(); render(); }
+    if(va === "engine"){ prog.settings.ttsEngine = vn; prog.settings.voice = ""; saveLocal(); voiceInfo = null; render(); }
+    if(va === "settings") NAR.openSettings().catch(function(){});
+    if(va === "reload"){ voiceInfo = null; render(); }
     return;
   }
   if(el.hasAttribute("data-nset")){

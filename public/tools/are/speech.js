@@ -250,28 +250,29 @@ function speak(text){
 
 /* ---------- what gets read ---------- */
 var MAX = 3500;   // under Android's TextToSpeech input limit
-function push(list, text, pause, g, role, label){
+function push(list, text, pause, g, role, label, key){
   var t = speak(text);
   if(!t) return;
   while(t.length > MAX){
     var cut = t.lastIndexOf(". ", MAX); if(cut < 200) cut = t.lastIndexOf(" ", MAX);
-    list.push({ text:t.slice(0, cut + 1), pause:150, g:g, role:role, label:label });
+    list.push({ text:t.slice(0, cut + 1), pause:150, g:g, role:role, label:label, key:key });
     t = t.slice(cut + 1).trim();
   }
-  list.push({ text:t, pause:pause, g:g, role:role, label:label });
+  list.push({ text:t, pause:pause, g:g, role:role, label:label, key:key });
 }
 function chapterItems(topic){
   var out = [], blocks = topic.read || [];
   blocks.forEach(function(b, g){
     var label = "Page " + (g+1) + " of " + blocks.length;
-    if(g === 0) push(out, topic.title + ".", 900, g, "title", label);
-    if(b.h && !(g === 0 && b.h.trim().toLowerCase() === String(topic.title).trim().toLowerCase())) push(out, b.h + ".", 650, g, "h", label);
-    (b.p||[]).forEach(function(x){ push(out, x, 450, g, "p", label); });
-    (b.ul||[]).forEach(function(x){ push(out, x, 350, g, "li", label); });
-    (b.ol||[]).forEach(function(x, k){ push(out, intWords(k+1) + ". " + x, 350, g, "li", label); });
-    if(b.table) push(out, "There is a table here. It is on screen.", 450, g, "table", label);
-    (b.p2||[]).forEach(function(x){ push(out, x, 450, g, "p", label); });
-    if(b.note) push(out, (b.noteTitle || "Exam tip") + ". " + b.note, 450, g, "note", label);
+    var same = b.h && g === 0 && b.h.trim().toLowerCase() === String(topic.title).trim().toLowerCase();
+    if(g === 0) push(out, topic.title + ".", 900, g, "title", label, same ? "h" : "");
+    if(b.h && !same) push(out, b.h + ".", 650, g, "h", label, "h");
+    (b.p||[]).forEach(function(x, k){ push(out, x, 450, g, "p", label, "p" + k); });
+    (b.ul||[]).forEach(function(x, k){ push(out, x, 350, g, "li", label, "u" + k); });
+    (b.ol||[]).forEach(function(x, k){ push(out, intWords(k+1) + ". " + x, 350, g, "li", label, "o" + k); });
+    if(b.table) push(out, "There is a table here. It is on screen.", 450, g, "table", label, "t");
+    (b.p2||[]).forEach(function(x, k){ push(out, x, 450, g, "p", label, "q" + k); });
+    if(b.note) push(out, (b.noteTitle || "Exam tip") + ". " + b.note, 450, g, "note", label, "n");
     if(out.length) out[out.length-1].pause = g === blocks.length - 1 ? 0 : 1100;
   });
   return out;
@@ -304,7 +305,11 @@ var native = {
   seek:function(i){ return Cap.nativePromise("Narrator", "seek", { index:i }); },
   setRate:function(r){ return Cap.nativePromise("Narrator", "setRate", { rate:r }); },
   state:function(){ return Cap.nativePromise("Narrator", "getState", {}); },
-  check:function(){ return Cap.nativePromise("Narrator", "check", {}); }
+  check:function(){ return Cap.nativePromise("Narrator", "check", {}); },
+  voices:function(engine){ return Cap.nativePromise("Narrator", "getVoices", { engine:engine || "" }); },
+  preview:function(o){ return Cap.nativePromise("Narrator", "preview", o); },
+  stopPreview:function(){ return Cap.nativePromise("Narrator", "stopPreview", {}); },
+  openSettings:function(){ return Cap.nativePromise("Narrator", "openSettings", {}); }
 };
 if(hasNative){
   try{ Cap.addListener("Narrator", "progress", function(d){ if(d) emit(d); }); }catch(e){ hasNative = false; }
@@ -312,27 +317,43 @@ if(hasNative){
 
 /* Browser fallback: same events, driven from JS. Stops when the page sleeps. */
 var web = (function(){
-  var ss = window.speechSynthesis, S = { state:"stopped", index:0, session:"", count:0, rate:1 }, items = [], gen = 0, timer = null;
+  var ss = window.speechSynthesis, S = { state:"stopped", index:0, session:"", count:0, rate:1 }, items = [], gen = 0, timer = null, voice = "";
+  function findVoice(name){ var vs = ss && ss.getVoices ? ss.getVoices() : []; for(var i=0;i<vs.length;i++) if(vs[i].voiceURI === name || vs[i].name === name) return vs[i]; return null; }
   function snap(){ return { state:S.state, index:S.index, session:S.session, count:items.length, rate:S.rate }; }
   function playFrom(i){
     gen++; var my = gen; clearTimeout(timer); ss.cancel();
     if(i >= items.length){ S.state = "done"; emit(snap()); return; }
     S.index = i; S.state = "playing"; emit(snap());
     var u = new SpeechSynthesisUtterance(items[i].text); u.rate = S.rate; u.lang = "en-US";
+    var v = voice && findVoice(voice); if(v){ u.voice = v; u.lang = v.lang; }
     u.onend = function(){ if(my !== gen) return; timer = setTimeout(function(){ if(my === gen) playFrom(i + 1); }, items[i].pause || 0); };
     u.onerror = u.onend;
     ss.speak(u);
   }
   return {
     kind:"web",
-    play:function(o){ items = o.items; S.session = o.session; S.rate = o.rate || 1; playFrom(o.start || 0); return Promise.resolve(snap()); },
+    play:function(o){ items = o.items; S.session = o.session; S.rate = o.rate || 1; voice = o.voice || ""; playFrom(o.start || 0); return Promise.resolve(snap()); },
     pause:function(){ gen++; clearTimeout(timer); ss.cancel(); if(S.state === "playing"){ S.state = "paused"; emit(snap()); } return Promise.resolve(snap()); },
     resume:function(){ if(S.state === "paused") playFrom(S.index); return Promise.resolve(snap()); },
     stop:function(){ gen++; clearTimeout(timer); ss.cancel(); S.state = "stopped"; emit(snap()); return Promise.resolve(snap()); },
     seek:function(i){ i = Math.max(0, Math.min(items.length - 1, i)); if(S.state === "playing") playFrom(i); else { S.index = i; emit(snap()); } return Promise.resolve(snap()); },
     setRate:function(r){ S.rate = r; if(S.state === "playing") playFrom(S.index); return Promise.resolve(snap()); },
     state:function(){ return Promise.resolve(snap()); },
-    check:function(){ return Promise.resolve({ ok:true }); }
+    check:function(){ return Promise.resolve({ ok:true }); },
+    voices:function(){
+      return new Promise(function(res){
+        function list(){ return (ss.getVoices ? ss.getVoices() : []).filter(function(v){ return /^en\b/i.test(v.lang); }).map(function(v){
+          return { name:v.voiceURI || v.name, label:v.name, locale:v.lang, localeLabel:v.lang, quality:0, network:!v.localService, installed:true }; }); }
+        var l = list();
+        if(l.length || !("onvoiceschanged" in ss)) return res({ ok:true, engines:[], voices:l });
+        ss.onvoiceschanged = function(){ res({ ok:true, engines:[], voices:list() }); };
+        setTimeout(function(){ res({ ok:true, engines:[], voices:list() }); }, 1500);
+      });
+    },
+    preview:function(o){ if(S.state === "playing") this.pause(); ss.cancel(); var u = new SpeechSynthesisUtterance(o.text); u.rate = o.rate || 1;
+      var v = o.voice && findVoice(o.voice); if(v){ u.voice = v; u.lang = v.lang; } ss.speak(u); return Promise.resolve(); },
+    stopPreview:function(){ ss.cancel(); return Promise.resolve(); },
+    openSettings:function(){ return Promise.resolve(); }
   };
 })();
 
@@ -350,6 +371,10 @@ window.ARE_NARRATOR = {
   seek: function(i){ return engine.seek(i); },
   setRate: function(r){ return engine.setRate(r); },
   state: function(){ return engine ? engine.state() : Promise.resolve({ state:"stopped" }); },
-  check: function(){ return engine ? engine.check() : Promise.resolve({ ok:false, reason:"none" }); }
+  check: function(){ return engine ? engine.check() : Promise.resolve({ ok:false, reason:"none" }); },
+  voices: function(e){ return engine ? engine.voices(e) : Promise.resolve({ ok:false, engines:[], voices:[] }); },
+  preview: function(o){ return engine.preview(o); },
+  stopPreview: function(){ return engine.stopPreview(); },
+  openSettings: function(){ return engine.openSettings(); }
 };
 })();

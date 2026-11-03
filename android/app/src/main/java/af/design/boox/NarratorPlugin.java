@@ -7,6 +7,9 @@ import android.content.pm.ResolveInfo;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
+import android.provider.Settings;
+import android.speech.tts.TextToSpeech;
+import android.speech.tts.Voice;
 
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
@@ -20,7 +23,9 @@ import com.getcapacitor.annotation.CapacitorPlugin;
 
 import org.json.JSONObject;
 
+import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Consumer;
 
 /**
  * Bridge between the ARE page and NarrationService. JS:
@@ -33,6 +38,13 @@ public class NarratorPlugin extends Plugin {
     private final Handler main = new Handler(Looper.getMainLooper());
     private boolean askedNotify = false;
 
+    // A second TextToSpeech used only to list voices and play previews (main thread only).
+    private TextToSpeech probe;
+    private String probeEngine = null;
+    private boolean probeReady = false;
+    private int probeToken = 0;
+    private final List<Consumer<Boolean>> probeWaiting = new ArrayList<>();
+
     @Override
     public void load() {
         NarrationService.listener = () -> notifyListeners("progress", snapshot());
@@ -41,6 +53,113 @@ public class NarratorPlugin extends Plugin {
     @Override
     protected void handleOnDestroy() {
         NarrationService.listener = null;
+        if (probe != null) { try { probe.shutdown(); } catch (Exception ignored) { } probe = null; }
+    }
+
+    private void withProbe(String engine, Consumer<Boolean> cb) {
+        if (probe != null && engine.equals(probeEngine)) {
+            if (probeReady) cb.accept(true); else probeWaiting.add(cb);
+            return;
+        }
+        if (probe != null) { try { probe.shutdown(); } catch (Exception ignored) { } }
+        for (Consumer<Boolean> w : probeWaiting) w.accept(false);
+        probeWaiting.clear();
+        probeWaiting.add(cb);
+        probeReady = false;
+        probeEngine = engine;
+        final int token = ++probeToken;
+        probe = new TextToSpeech(getContext(), status -> main.post(() -> {
+            if (token != probeToken) return;
+            probeReady = status == TextToSpeech.SUCCESS;
+            List<Consumer<Boolean>> ws = new ArrayList<>(probeWaiting);
+            probeWaiting.clear();
+            for (Consumer<Boolean> w : ws) w.accept(probeReady);
+        }), engine.isEmpty() ? null : engine);
+    }
+
+    /** Installed engines plus the English voices of one engine ("" = the system default). */
+    @PluginMethod
+    public void getVoices(PluginCall call) {
+        final String engine = call.getString("engine", "");
+        main.post(() -> withProbe(engine, ok -> {
+            JSObject o = new JSObject();
+            JSArray engines = new JSArray();
+            JSArray voices = new JSArray();
+            if (!ok) { o.put("ok", false); o.put("engines", engines); o.put("voices", voices); call.resolve(o); return; }
+            try {
+                for (TextToSpeech.EngineInfo e : probe.getEngines()) {
+                    JSObject eo = new JSObject();
+                    eo.put("name", e.name);
+                    eo.put("label", e.label);
+                    engines.put(eo);
+                }
+                o.put("defaultEngine", probe.getDefaultEngine());
+                Voice dv = probe.getDefaultVoice();
+                o.put("defaultVoice", dv != null ? dv.getName() : "");
+                if (probe.getVoices() != null) {
+                    for (Voice v : probe.getVoices()) {
+                        if (v.getLocale() == null || !"en".equals(v.getLocale().getLanguage())) continue;
+                        JSObject vo = new JSObject();
+                        vo.put("name", v.getName());
+                        vo.put("locale", v.getLocale().toLanguageTag());
+                        vo.put("localeLabel", v.getLocale().getDisplayName());
+                        vo.put("quality", v.getQuality());
+                        vo.put("network", v.isNetworkConnectionRequired());
+                        vo.put("installed", v.getFeatures() == null
+                                || !v.getFeatures().contains(TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED));
+                        voices.put(vo);
+                    }
+                }
+                o.put("ok", true);
+            } catch (Exception e) {
+                o.put("ok", false);
+                o.put("error", e.getMessage());
+            }
+            o.put("engines", engines);
+            o.put("voices", voices);
+            call.resolve(o);
+        }));
+    }
+
+    /** Speak a sample in a given engine/voice/rate. Pauses any narration first. */
+    @PluginMethod
+    public void preview(PluginCall call) {
+        final String engine = call.getString("engine", "");
+        final String voice = call.getString("voice", "");
+        final String text = call.getString("text", "This is how I will sound.");
+        final Double rate = call.getDouble("rate");
+        main.post(() -> {
+            if (NarrationService.instance != null) NarrationService.instance.pause();
+            withProbe(engine, ok -> {
+                if (!ok) { call.reject("That engine did not start"); return; }
+                try {
+                    if (!voice.isEmpty() && probe.getVoices() != null) {
+                        for (Voice v : probe.getVoices()) if (voice.equals(v.getName())) { probe.setVoice(v); break; }
+                    }
+                    probe.setSpeechRate(rate != null && rate > 0.2 ? rate.floatValue() : 1f);
+                    probe.speak(text, TextToSpeech.QUEUE_FLUSH, null, "preview");
+                    call.resolve();
+                } catch (Exception e) { call.reject(e.getMessage()); }
+            });
+        });
+    }
+
+    @PluginMethod
+    public void stopPreview(PluginCall call) {
+        main.post(() -> { if (probe != null) probe.stop(); call.resolve(); });
+    }
+
+    /** Android's text-to-speech settings, where engines and voice data are managed. */
+    @PluginMethod
+    public void openSettings(PluginCall call) {
+        try {
+            Intent i = new Intent("com.android.settings.TTS_SETTINGS").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            getContext().startActivity(i);
+        } catch (Exception e) {
+            try { getContext().startActivity(new Intent(Settings.ACTION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)); }
+            catch (Exception ignored) { }
+        }
+        call.resolve();
     }
 
     private static JSObject snapshot() {
@@ -91,7 +210,11 @@ public class NarratorPlugin extends Plugin {
         final String title = call.getString("title", "Narration");
         final int start = call.getInt("start", 0);
         final Double rate = call.getDouble("rate");
+        final String voice = call.getString("voice", "");
+        final String engine = call.getString("engine", "");
         onMain(call, () -> {
+            NarrationService.voiceName = voice == null ? "" : voice;
+            NarrationService.enginePkg = engine == null ? "" : engine;
             NarrationService.items.clear();
             for (int k = 0; k < arr.length(); k++) {
                 JSONObject it = arr.optJSONObject(k);
