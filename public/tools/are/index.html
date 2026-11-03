@@ -63,10 +63,10 @@ img{max-width:100%}
 html,body{height:100%}
 body{
   margin:0;background:var(--paper);color:var(--ink);
+  display:flex;flex-direction:column;height:100vh;height:100dvh;overflow:hidden;
   font-family:var(--serif);font-size:var(--fs);line-height:1.65;
   -webkit-text-size-adjust:100%;
 }
-body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:30;background:var(--paper)}
 .wrap{width:100%;max-width:var(--measure);margin:0 auto;
   padding-left:max(16px,env(safe-area-inset-left,0px));
   padding-right:max(16px,env(safe-area-inset-right,0px))}
@@ -81,7 +81,7 @@ a{color:var(--accent)}
 .num{font-variant-numeric:tabular-nums}
 .eyebrow{font-family:var(--sans);font-size:.68em;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-2);display:block;line-height:1.5}
 
-header.mast{position:sticky;top:env(safe-area-inset-top,0px);z-index:20;background:var(--paper);border-bottom:var(--bw2) solid var(--rule-hard)}
+header.mast{flex:none;background:var(--paper);border-bottom:var(--bw2) solid var(--rule-hard);padding-top:env(safe-area-inset-top,0px)}
 .mast-in{display:flex;align-items:center;gap:8px;padding-block:9px;min-height:54px}
 .mast .ttl{flex:1;min-width:0}
 .mast .ttl b{font-family:var(--sans);font-size:.95em;font-weight:600;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -94,7 +94,7 @@ header.mast{position:sticky;top:env(safe-area-inset-top,0px);z-index:20;backgrou
 .btn-icon{min-width:44px;padding:8px;text-align:center}
 .btn[disabled]{opacity:.45;cursor:default}
 .row{display:flex;gap:8px;flex-wrap:wrap}
-main{padding-block:18px 104px}
+main{flex:1 1 auto;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch;padding-block:16px 20px}
 
 .meter{display:inline-flex;gap:2px;vertical-align:middle}
 .meter i{width:9px;height:14px;border:var(--bw) solid var(--rule-hard);background:var(--paper);display:block}
@@ -121,7 +121,19 @@ main{padding-block:18px 104px}
 .seqcode{font-family:var(--mono);font-size:.92em;font-weight:500;border:var(--bw2) solid var(--ink);
   padding:3px 6px;border-radius:var(--rad);min-width:3.4em;text-align:center;flex:none}
 .seqnow{border:var(--bw2) solid var(--ink);border-left:6px solid var(--accent);border-radius:var(--rad);
-  padding:13px;background:var(--paper-2);margin:12px 0 16px}
+  padding:12px 13px;background:var(--paper-2);margin:0 0 14px}
+.ready{display:flex;align-items:center;gap:10px;flex-wrap:wrap;border:var(--bw2) solid var(--ink);border-radius:var(--rad);padding:9px 13px;margin:0 0 12px}
+.ready .eyebrow{flex:1;min-width:8em}
+.ready .score{font-family:var(--mono);font-size:1.5em;line-height:1}
+.ready .score small{font-size:.5em;color:var(--ink-2)}
+.srow{display:flex;gap:10px;align-items:center;width:100%;text-align:left;background:var(--paper);font:inherit;color:inherit;
+  border:var(--bw) solid var(--rule-hard);border-radius:var(--rad);padding:8px 11px;cursor:pointer;min-height:52px}
+.srow[data-cur="1"]{border-width:var(--bw2);border-color:var(--ink);background:var(--paper-2)}
+.srow[data-done="1"] .seqcode{background:var(--ink);color:var(--paper)}
+.srow[data-done="1"] .snm{text-decoration:line-through;text-decoration-thickness:1px}
+.srow .snm{flex:1;min-width:0;font-family:var(--sans);font-weight:600;font-size:.88em;line-height:1.3}
+.srow .seqn{padding-top:0}
+.seqlist{display:flex;flex-direction:column;gap:6px}
 .seqedit{display:flex;gap:8px;align-items:center;border:var(--bw) solid var(--rule-hard);border-radius:var(--rad);
   padding:10px 12px;background:var(--paper);min-height:58px}
 .seqedit .nm2{flex:1;min-width:0;font-family:var(--sans);font-size:.88em;font-weight:600}
@@ -229,9 +241,10 @@ tbody tr:last-child td{border-bottom:0}
   border:var(--bw) solid currentColor;border-radius:var(--rad);padding:2px 7px;white-space:nowrap}
 .pill.ok{color:var(--good)} .pill.mid{color:var(--warn)} .pill.low{color:var(--bad)}
 
-.rail{position:fixed;left:0;right:0;bottom:0;z-index:20;background:var(--paper);border-top:var(--bw2) solid var(--rule-hard);
+.rail{flex:none;background:var(--paper);border-top:var(--bw2) solid var(--rule-hard);
   padding-bottom:env(safe-area-inset-bottom,0px)}
-.rail-in{display:flex;gap:8px;padding-block:9px;align-items:center}
+.rail-in{display:flex;gap:8px;padding-block:8px;align-items:center}
+.rail-in:empty{display:none}
 .rail .btn{flex:1}
 .sync{font-family:var(--sans);font-size:.7em;color:var(--ink-2);text-align:center;padding-bottom:5px;letter-spacing:.04em}
 .muted{color:var(--ink-2)}
@@ -822,13 +835,14 @@ function shuffle(a){ for(var i=a.length-1;i>0;i--){ var j=Math.floor(Math.random
 /* ---------- routing ---------- */
 var route = { v:"home" };
 var cstate = null, searchQ = "";
+function toTop(){ var m = document.querySelector("main"); if(m) m.scrollTop = 0; }
 function go(r){
   if(tick){ clearInterval(tick); tick = null; }
   route = r;
   /* replaceState, not location.hash: hash changes would pile up WebView history
      that Android's back button walks through without re-rendering. */
   if(r.v === "div" && r.d){ try{ history.replaceState(null, "", "#" + r.d); }catch(e){} }
-  window.scrollTo(0,0);
+  toTop();
   render();
 }
 function topicOf(r){ var d = byId[r.d]; return d ? d.topics.filter(function(t){ return t.id === r.t; })[0] : null; }
@@ -836,15 +850,13 @@ function topicOf(r){ var d = byId[r.d]; return d ? d.topics.filter(function(t){ 
 /* ---------- views ---------- */
 function vHome(){
   var o = overall();
-  var h = '<div class="banner"><span class="eyebrow">Overall readiness</span>'
-    + '<span class="big num">' + o + '<span style="font-size:.4em"> / 100</span></span>'
-    + '<div class="row" style="margin-top:10px;align-items:center">' + meter(o)
-    + ' <span class="pill ' + band(o) + '">' + bandWord(o) + "</span></div>"
-    + '<p class="small muted" style="margin:10px 0 0">Readiness combines what you have read, the cards you can recall, your best quiz scores, and how confident you say you are. A division counts as ready to book at 85+ <em>and</em> 75% on a full-length mock.</p></div>';
+  var h = '<div class="ready"><span class="eyebrow">Overall readiness</span>'
+    + '<span class="score num">' + o + '<small> / 100</small></span>' + meter(o)
+    + ' <span class="pill ' + band(o) + '">' + bandWord(o) + "</span></div>";
 
   var due = dueCards(), miss = missList();
   if(due.length || miss.length){
-    h += '<div class="row" style="margin-bottom:14px">';
+    h += '<div class="row" style="margin-bottom:12px">';
     if(due.length) h += '<button class="btn btn-primary" style="flex:1" data-go=\'{"v":"due"}\'>' + due.length + " card" + (due.length===1?"":"s") + " due</button>";
     if(miss.length) h += '<button class="btn" style="flex:1" data-go=\'{"v":"review"}\'>Review ' + miss.length + ' missed</button>';
     h += "</div>";
@@ -854,13 +866,14 @@ function vHome(){
 
   if(cur){
     var st = divStatus(cur), w = weakest(cur), na = w ? nextAction(w) : null;
+    var weak = (na && st.k !== "ready" && st.k !== "near") ? " Weakest topic: " + w.title + "." : "";
     h += '<div class="seqnow"><span class="eyebrow">Division ' + (s.indexOf(cur.id)+1) + " of 6 · up now</span>"
-      + '<div style="font-family:var(--sans);font-weight:600;font-size:1.05em;margin:4px 0 6px">'
-      + esc(cur.code) + " · " + esc(cur.name) + "</div>"
-      + '<div class="row" style="align-items:center;margin-bottom:8px">' + meter(divReadiness(cur))
-      + ' <span class="pill ' + st.pill + '">' + esc(st.label) + "</span></div>"
-      + '<div class="small muted">' + esc(gateNote(cur)) + "</div>";
-    h += '<div class="row" style="margin-top:11px">';
+      + '<div class="row" style="align-items:center;justify-content:space-between;margin:3px 0 4px">'
+      + '<span style="font-family:var(--sans);font-weight:600;font-size:1.05em">' + esc(cur.code) + " · " + esc(cur.name) + "</span>"
+      + '<span class="row" style="align-items:center;flex-wrap:nowrap">' + meter(divReadiness(cur))
+      + ' <span class="pill ' + st.pill + '">' + esc(st.label) + "</span></span></div>"
+      + '<div class="small muted">' + esc(gateNote(cur) + weak) + "</div>";
+    h += '<div class="row" style="margin-top:10px">';
     if(st.k === "ready"){
       h += '<button class="btn btn-primary btn-sm" data-pass="' + cur.id + '">Mark ' + esc(cur.code) + " passed</button>"
         + '<button class="btn btn-sm" data-go=\'{"v":"div","d":"' + cur.id + '"}\'>Keep reviewing</button>';
@@ -872,38 +885,30 @@ function vHome(){
         + esc(na.label) + "</button>"
         + '<button class="btn btn-sm" data-go=\'{"v":"div","d":"' + cur.id + '"}\'>All ' + esc(cur.code) + " topics</button>";
     }
-    h += "</div><div class=\"small muted\" style=\"margin-top:8px\">"
-      + (na && st.k !== "ready" && st.k !== "near" ? esc(w.title) + " is your weakest topic in " + esc(cur.code) + "." : "")
-      + "</div></div>";
+    h += "</div></div>";
   } else {
     h += '<div class="seqnow"><span class="eyebrow">Sequence complete</span>'
-      + '<div style="font-family:var(--sans);font-weight:600;font-size:1.05em;margin:4px 0 6px">All six divisions marked passed</div>'
-      + '<div class="small muted">Nothing left in the queue. Unmark a division in the sequence editor if that was premature.</div>'
-      + '<div class="row" style="margin-top:11px"><button class="btn btn-sm" data-go=\'{"v":"sequence"}\'>Edit sequence</button></div></div>';
+      + '<div style="font-family:var(--sans);font-weight:600;font-size:1.05em;margin:3px 0 4px">All six divisions marked passed</div>'
+      + '<div class="small muted">Unmark a division in the sequence editor if that was premature.</div></div>';
   }
 
-  h += '<div class="row" style="justify-content:space-between;align-items:center;margin:18px 0 10px">'
-    + '<h2 style="margin:0">Your exam sequence</h2>'
+  h += '<div class="row" style="justify-content:space-between;align-items:center;margin:4px 0 8px">'
+    + '<h2 style="margin:0">Exam sequence <span class="small muted" style="font-weight:400">· ' + nPassed + ' of 6 passed</span></h2>'
     + '<button class="btn btn-sm" data-go=\'{"v":"sequence"}\'>Reorder</button></div>';
-  h += '<p class="small muted" style="margin:-4px 0 12px">' + nPassed + " of 6 passed. NCARB lets you sit the divisions in any order — this is their listing order, which follows a project from practice to construction. Reorder it to match your plan.</p>";
-  h += '<div class="seq">';
+  h += '<div class="seqlist">';
   s.forEach(function(id, i){
     var d = byId[id], m = divReadiness(d), stt = divStatus(d), isCur = cur && cur.id === id;
-    h += '<button class="seqitem" data-cur="' + (isCur?1:0) + '" data-done="' + (prog.passed[id]?1:0)
+    h += '<button class="srow" data-cur="' + (isCur?1:0) + '" data-done="' + (prog.passed[id]?1:0)
       + '" data-go=\'{"v":"div","d":"' + id + '"}\'>'
       + '<span class="seqn">' + (i+1) + "</span>"
       + '<span class="seqcode">' + esc(d.code) + "</span>"
-      + '<span class="dmeta"><span class="nm">' + esc(d.name) + "</span>"
-      + '<span class="sub">' + meter(m) + ' <span class="num">' + m + "</span>/100 · "
-      + d.format.items + " items · " + mins(d.format.minutes) + "</span>"
-      + '<span class="sub" style="margin-top:4px"><span class="pill ' + stt.pill + '">' + esc(stt.label) + "</span></span></span></button>";
+      + '<span class="snm">' + esc(d.name) + "</span>"
+      + meter(m) + ' <span class="pill ' + stt.pill + '">' + esc(stt.label) + "</span></button>";
   });
   h += "</div>";
-  h += '<hr class="divider"><div class="row">'
-    + '<button class="btn" data-go=\'{"v":"sequence"}\'>Exam sequence</button>'
-    + '<button class="btn" data-go=\'{"v":"extras"}\'>Reference &amp; exam day</button>'
-    + '<button class="btn" data-go=\'{"v":"tracker"}\'>Progress tracker</button>'
-    + '<button class="btn" data-go=\'{"v":"settings"}\'>Display &amp; data</button></div>';
+  h += '<div class="row" style="margin-top:12px">'
+    + '<button class="btn btn-sm" style="flex:1" data-go=\'{"v":"extras"}\'>Reference &amp; exam day</button>'
+    + '<button class="btn btn-sm" style="flex:1" data-go=\'{"v":"tracker"}\'>Progress tracker</button></div>';
   return { title:"ARE Prep Tools", crumb:"ARE 5.0", html:h };
 }
 
@@ -1147,7 +1152,7 @@ function vSequence(){
   h += "</div>";
   h += '<div class="row"><button class="btn btn-sm" data-seqreset="1">Reset to NCARB listing order</button></div>';
   h += '<hr class="divider"><h3 style="margin-bottom:8px">When is a division ready?</h3>'
-    + '<div class="read"><p>This tool calls a division ready to schedule when two things are both true: every topic averages <strong>85 or better</strong> on readiness, and you have scored <strong>75% or better on a full-length practice exam</strong> at that division’s real item count. Topic readiness alone is not enough — it measures what you have studied, not whether you can sustain it for four hours.</p>'
+    + '<div class="read"><p>Readiness combines what you have read, the cards you can recall, your best quiz scores and how confident you say you are.</p><p>This tool calls a division ready to schedule when two things are both true: every topic averages <strong>85 or better</strong> on readiness, and you have scored <strong>75% or better on a full-length practice exam</strong> at that division’s real item count. Topic readiness alone is not enough — it measures what you have studied, not whether you can sustain it for four hours.</p>'
     + '<p class="small muted">75% is a working threshold, not a published pass mark. NCARB scores the ARE against a criterion-referenced standard and does not release a percentage, so treat this as a signal to book rather than a guarantee.</p></div>';
   return { title:"Exam sequence", crumb:"Order and readiness", html:h };
 }
@@ -1452,7 +1457,7 @@ document.addEventListener("click", function(e){
     else go({ v:"div", d:route.d, tab:el.getAttribute("data-tab") });
     return;
   }
-  if(el.hasAttribute("data-page")){ route.i = parseInt(el.getAttribute("data-page"), 10); window.scrollTo(0,0); render(); return; }
+  if(el.hasAttribute("data-page")){ route.i = parseInt(el.getAttribute("data-page"), 10); toTop(); render(); return; }
   if(el.getAttribute("data-done") === "read"){ touch(route.t, function(p){ p.read = true; }); go({ v:"topic", d:route.d, t:route.t }); return; }
   if(el.hasAttribute("data-conf")){
     var c = parseInt(el.getAttribute("data-conf"), 10);
@@ -1462,9 +1467,9 @@ document.addEventListener("click", function(e){
   if(el.hasAttribute("data-grade")){
     var holder = el.parentNode;
     schedule(holder.getAttribute("data-topic"), parseInt(holder.getAttribute("data-idx"),10), parseInt(el.getAttribute("data-grade"),10));
-    cstate.pos++; cstate.flipped = false; window.scrollTo(0,0); render(); return;
+    cstate.pos++; cstate.flipped = false; toTop(); render(); return;
   }
-  if(el.hasAttribute("data-restart")){ cstate = null; window.scrollTo(0,0); render(); return; }
+  if(el.hasAttribute("data-restart")){ cstate = null; toTop(); render(); return; }
 
   /* answering */
   if(run && !run.done && el.hasAttribute("data-pick")){
@@ -1523,18 +1528,18 @@ document.addEventListener("click", function(e){
     }
     if(run.i === run.items.length - 1){ finishRun(); }
     else { run.i++; run.sel = null; }
-    window.scrollTo(0,0); render(); return;
+    toTop(); render(); return;
   }
   if(run && el.hasAttribute("data-rnav")){
     if(kindOf(run.items[run.i].q) === "num"){ var i3 = document.getElementById("numin"); if(i3) run.answers[run.i] = i3.value; }
     run.i = Math.max(0, Math.min(run.items.length-1, run.i + parseInt(el.getAttribute("data-rnav"),10)));
-    run.sel = null; window.scrollTo(0,0); render(); return;
+    run.sel = null; toTop(); render(); return;
   }
-  if(el.hasAttribute("data-docs")){ run.view = "docs"; window.scrollTo(0,0); render(); return; }
+  if(el.hasAttribute("data-docs")){ run.view = "docs"; toTop(); render(); return; }
   if(el.hasAttribute("data-doc")){
     var dv = el.getAttribute("data-doc");
     run.view = dv === "back" ? "q" : dv === "list" ? "docs" : "doc:" + dv;
-    window.scrollTo(0,0); render(); return;
+    toTop(); render(); return;
   }
   if(el.hasAttribute("data-again")){
     if(run.kind === "mock") startMock(byId[run.divId], run.items.length);
