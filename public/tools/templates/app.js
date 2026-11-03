@@ -23,13 +23,15 @@ const PAPERS = [
 /* ---------- state ---------- */
 
 const KEY = 'afs-template-maker-v1';
-const OUT_DEFAULTS = { format: 'png', pages: 1, dest: native ? 'boox' : 'download', folder: '', paper: 'device', landscape: false, ppi: 0, batchOn: false, batch: '' };
+const OUT_DEFAULTS = { format: 'png', pages: 1, dest: native ? 'boox' : 'download', paper: 'device', landscape: false, ppi: 0, batchOn: false, batch: '' };
 let state = { s: { ...DEFAULTS }, out: { ...OUT_DEFAULTS }, saved: [] };
 try {
   const raw = JSON.parse(localStorage.getItem(KEY) || 'null');
   if (raw) state = { s: { ...DEFAULTS, ...migrate(raw.s || {}) }, out: { ...OUT_DEFAULTS, ...raw.out }, saved: Array.isArray(raw.saved) ? raw.saved : [] };
 } catch { /* storage unavailable: start fresh */ }
 if (!native && state.out.dest !== 'download') state.out.dest = 'download';
+if (native && !['boox', 'share'].includes(state.out.dest)) state.out.dest = 'boox'; // build 14–15 had Downloads
+delete state.out.folder;
 
 function persist() {
   try { localStorage.setItem(KEY, JSON.stringify(state)); } catch { /* ignore */ }
@@ -38,7 +40,7 @@ function persist() {
 let device = {
   width: Math.round(Math.min(screen.width, screen.height) * (devicePixelRatio || 1)),
   height: Math.round(Math.max(screen.width, screen.height) * (devicePixelRatio || 1)),
-  ppi: 300, allFiles: false, folders: [], notesApp: false,
+  ppi: 300, folder: 'Documents/AFS Templates', files: [],
 };
 
 function paper() {
@@ -113,9 +115,8 @@ const GROUPS = [
     { type: 'seg', o: true, key: 'format', label: 'File type', options: [['png', 'PNG image'], ['pdf', 'PDF']] },
     { type: 'step', o: true, key: 'pages', label: 'PDF pages', min: 1, max: 200, step: 1, unit: 'pages', big: 10, when: () => state.out.format === 'pdf',
       hint: 'One page for a template. Many pages make a ready-made notebook: open the PDF in Notes and the name is on every page.' },
-    { type: 'seg', o: true, key: 'dest', label: 'Send to', options: () => native ? [['boox', 'Templates folder'], ['downloads', 'Downloads'], ['share', 'Share…']] : [['download', 'Download']] },
-    { type: 'access', when: () => native && state.out.dest === 'boox' },
-    { type: 'folders', when: () => native && state.out.dest === 'boox' && device.allFiles },
+    { type: 'seg', o: true, key: 'dest', label: 'Send to', options: () => native ? [['boox', 'AFS Templates folder'], ['share', 'Share…']] : [['download', 'Download']] },
+    { type: 'folderinfo', when: () => native && state.out.dest === 'boox' },
   ] },
   { title: 'Saved setups', rows: [{ type: 'saved' }] },
 ];
@@ -205,35 +206,16 @@ function rowFor(row) {
     }
     wrap.append(grid);
     refresh = () => { for (const k in outs) outs[k].textContent = state.s[k]; };
-  } else if (row.type === 'access') {
+  } else if (row.type === 'folderinfo') {
     const box = el('div', { class: 'note' });
     wrap.append(box);
     refresh = () => {
-      if (device.allFiles) { box.hidden = true; return; }
-      box.hidden = false;
+      const n = device.files.length;
+      const recent = device.files.slice(0, 6);
       box.replaceChildren(
-        el('p', {}, 'To write straight into the Notes template folder, this app needs Android\'s "All files access". Turn it on for AFS Custom Boox on the next screen, then come back.'),
-        el('button', { type: 'button', onclick: grantAccess }, 'Allow file access'));
-    };
-  } else if (row.type === 'folders') {
-    const box = el('div');
-    wrap.append(el('span', { class: 'lab' }, 'Template folder'), box);
-    refresh = () => {
-      const found = device.folders.map((f) => f.path);
-      const kids = [];
-      if (found.length) {
-        kids.push(el('div', { class: 'seg' }, ...found.map((p) => el('button', {
-          type: 'button', 'aria-pressed': String(state.out.folder === p),
-          onclick: () => { state.out.folder = p; changed({ rebuild: true }); },
-        }, p))));
-      } else {
-        kids.push(el('p', { class: 'empty' }, 'No template folder found on this tablet yet. The one below will be created.'));
-      }
-      const input = el('input', { type: 'text', value: state.out.folder, autocomplete: 'off', spellcheck: 'false' });
-      input.addEventListener('change', () => { state.out.folder = input.value.trim().replace(/^\/+|\/+$/g, ''); persist(); refreshPanel(); });
-      kids.push(el('span', { class: 'hint', style: 'margin:12px 0 4px' }, 'Folder on internal storage'), input,
-        el('span', { class: 'hint' }, 'In Notes: open the notebook → Template → Local / Custom. If the new template doesn\'t show, close and reopen Notes.'));
-      box.replaceChildren(...kids);
+        el('p', {}, 'Saves to ', el('strong', {}, device.folder), ' on the tablet. A file with the same name is replaced, so remaking a template updates it.'),
+        el('p', {}, 'In Notes: open the notebook → Template → Import, then go to Documents › AFS Templates.'),
+        el('p', {}, n ? `${n} template${n === 1 ? '' : 's'} there${n > recent.length ? ', newest first' : ''}: ${recent.join(', ')}${n > recent.length ? ', …' : ''}` : 'Nothing saved there yet.'));
     };
   } else if (row.type === 'saved') {
     const list = el('div', { class: 'saved' });
@@ -304,7 +286,7 @@ function deleteSetup(i) {
 function resetAll() {
   if (!confirm('Reset every setting to the defaults? Saved setups are kept.')) return;
   state.s = { ...DEFAULTS };
-  state.out = { ...OUT_DEFAULTS, folder: state.out.folder };
+  state.out = { ...OUT_DEFAULTS };
   changed({ rebuild: true });
 }
 
@@ -357,11 +339,11 @@ function updateCreate() {
   const n = jobNames().length;
   const dest = state.out.dest;
   const what = n > 1 ? `${n} templates` : state.out.format === 'pdf' && state.out.pages > 1 ? 'notebook PDF' : 'template';
-  const verb = { boox: 'Save', downloads: 'Save', share: 'Share', download: 'Download' }[dest] || 'Create';
+  const verb = { boox: 'Save', share: 'Share', download: 'Download' }[dest] || 'Create';
   const btn = $('create');
   btn.textContent = `${verb} ${what}`;
   btn.disabled = busy || (dest === 'share' && n > 1);
-  if (dest === 'share' && n > 1 && !busy) setStatus('Share sends one file at a time. Pick Templates folder or Downloads for several names.');
+  if (dest === 'share' && n > 1 && !busy) setStatus('Share sends one file at a time. Pick the AFS Templates folder for several names.');
 }
 
 function nextFrame() { return new Promise((r) => requestAnimationFrame(() => r())); }
@@ -414,15 +396,6 @@ async function create() {
   if (!names.length) { setStatus('Type a notebook name first.'); return; }
   const dest = state.out.dest;
 
-  if (dest === 'boox') {
-    if (!device.allFiles) {
-      setStatus('Allow file access first (Output → Send to).');
-      panel.querySelector('.note')?.scrollIntoView();
-      return;
-    }
-    if (!state.out.folder) state.out.folder = device.folders[0]?.path || 'noteTemplate';
-  }
-
   busy = true;
   updateCreate();
   const done = [];
@@ -447,24 +420,19 @@ async function create() {
       }
       const base64 = bytesToBase64(file.bytes);
       if (dest === 'boox') {
-        const r = await call('saveFile', { folder: state.out.folder, filename: file.filename, base64 });
+        const r = await call('save', { filename: file.filename, base64, mime: file.mime });
         done.push(r.path + (r.replaced ? ' (replaced)' : ''));
-      } else if (dest === 'downloads') {
-        const r = await call('saveToDownloads', { filename: file.filename, base64, mime: file.mime });
-        done.push(r.path);
       } else if (dest === 'share') {
         await call('share', { filename: file.filename, base64, mime: file.mime });
         done.push(file.filename);
       }
     }
-    const where = { boox: 'Saved', downloads: 'Saved', share: 'Shared', download: 'Downloaded' }[dest];
-    const tail = dest === 'boox' ? ' In Notes: Template → Local/Custom.' : '';
-    setStatus(done.length === 1 ? `${where}: ${done[0]}.${tail}` : `${where} ${done.length} files to ${dest === 'boox' ? state.out.folder : 'Download/AFS Templates'}.${tail}`);
+    const where = { boox: 'Saved', share: 'Shared', download: 'Downloaded' }[dest];
+    const tail = dest === 'boox' ? ' In Notes: Template → Import → Documents › AFS Templates.' : '';
+    setStatus(done.length === 1 ? `${where}: ${done[0]}.${tail}` : `${where} ${done.length} files${dest === 'boox' ? ` to ${device.folder}` : ''}.${tail}`);
     if (dest === 'boox') await refreshDevice();
   } catch (err) {
-    const msg = String(err?.message || err);
-    setStatus(msg === 'NO_ACCESS' ? 'File access was turned off. Allow it again under Output.' : `Couldn't finish: ${msg}`);
-    if (msg === 'NO_ACCESS') { device.allFiles = false; refreshPanel(); }
+    setStatus(`Couldn't finish: ${String(err?.message || err)}`);
   } finally {
     busy = false;
     persist();
@@ -482,26 +450,14 @@ async function refreshDevice() {
     device = {
       width: r.width, height: r.height,
       ppi: dpi >= 120 && dpi <= 450 ? dpi : 300,
-      allFiles: !!r.allFiles, notesApp: !!r.notesApp,
-      folders: Array.isArray(r.folders) ? r.folders : [],
+      folder: r.folder || 'Documents/AFS Templates',
+      files: Array.isArray(r.files) ? r.files : [],
     };
-    if (device.allFiles && !state.out.folder) state.out.folder = device.folders[0]?.path || 'noteTemplate';
   } catch (err) {
     setStatus(`Couldn't read the tablet's details: ${err.message || err}`);
   }
   refreshPanel();
   schedulePreview();
-}
-
-async function grantAccess() {
-  try {
-    const r = await call('requestAllFiles');
-    await refreshDevice();
-    setStatus(r.allFiles ? 'File access is on. Templates go straight into the Notes folder.' : 'File access is still off. You can use Downloads or Share instead.');
-    buildPanel();
-  } catch (err) {
-    setStatus(`Couldn't open the setting: ${err.message || err}`);
-  }
 }
 
 /* ---------- start ---------- */

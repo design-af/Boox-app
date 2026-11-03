@@ -7,7 +7,7 @@ variables, so each notebook gets its own template with the name baked in.
 - `public/tools/templates/render.js` — pure drawing (no DOM). All sizes in mm, converted with the page PPI.
 - `public/tools/templates/pdf.js` — lossless PDF writer (8-bit gray images, FlateDecode via `CompressionStream`). Identical pages share one image.
 - `public/tools/templates/app.js` + `index.html` — UI. Settings and saved setups in localStorage (`afs-template-maker-v1`).
-- `android/.../TemplateFilesPlugin.java` — native `TemplateFiles` plugin: `info`, `requestAllFiles`, `saveFile`, `saveToDownloads`, `share`, `openNotes`.
+- `android/.../TemplateFilesPlugin.java` — native `TemplateFiles` plugin: `info` (screen size/PPI, folder, saved files), `save` (replaces same name), `share`.
 - `scripts/validate-templates.mjs` — renders every pattern × header × watermark × footer at four sizes against a mock canvas and checks the PDF structure. Runs in `npm test`.
 
 ## Features
@@ -18,9 +18,12 @@ variables, so each notebook gets its own template with the name baked in.
 - Spacing, line shade and weight, margins, typeface (bundled IBM Plex Sans/Mono, Spectral), bold.
 - Paper: this tablet's real screen size and PPI, Boox presets, A4/Letter; portrait or landscape; PPI override.
 - Output: PNG, or PDF (1–200 pages; many pages = a ready-made notebook with page numbers). Batch: one template per name.
-- Destinations: Notes template folder (needs Android "All files access"), Download/AFS Templates, share sheet. In a browser: download.
+- Destinations: the AFS Templates folder, or the share sheet. In a browser: download.
 
 ## Template folder
-The plugin lists existing folders: `noteTemplate`, `Notes/Templates`, `note/template`, then any folder named like `*template*`
-up to two levels deep. If none exists, `noteTemplate` is created. In Notes: open the notebook → Template → Local / Custom;
-close and reopen Notes if a new file doesn't appear. Which folder Notes reads depends on the firmware — confirm on the tablet.
+Boox Notes has no fixed folder it reads custom templates from, so the app saves to one folder it owns:
+**Documents/AFS Templates** on internal storage (build 16). On Android 10+ it writes through MediaStore,
+so no storage permission is needed; a file with the same name is overwritten in place. In Notes:
+open the notebook → Template → Import → Documents › AFS Templates.
+
+Builds 14–15 asked for "All files access" and guessed at Notes folders; that permission and code are gone.
