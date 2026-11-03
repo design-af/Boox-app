@@ -1,6 +1,6 @@
 // Template Maker — UI. Drawing lives in render.js, PDF output in pdf.js,
 // file access in the native TemplateFiles plugin (TemplateFilesPlugin.java).
-import { render, DEFAULTS, PATTERNS, HEADERS, WATERMARKS, FOOTERS, DATES, usesPageNumbers, safeFileName } from './render.js';
+import { render, migrate, DEFAULTS, PATTERNS, HEADERS, WATERMARKS, FOOTERS, SUB_ALIGNS, SUB_BGS, DATE_STYLES, DATE_POSITIONS, ALIGNS, usesPageNumbers, safeFileName } from './render.js';
 import { buildPdf, toGray } from './pdf.js';
 
 const $ = (id) => document.getElementById(id);
@@ -27,7 +27,7 @@ const OUT_DEFAULTS = { format: 'png', pages: 1, dest: native ? 'boox' : 'downloa
 let state = { s: { ...DEFAULTS }, out: { ...OUT_DEFAULTS }, saved: [] };
 try {
   const raw = JSON.parse(localStorage.getItem(KEY) || 'null');
-  if (raw) state = { s: { ...DEFAULTS, ...raw.s }, out: { ...OUT_DEFAULTS, ...raw.out }, saved: Array.isArray(raw.saved) ? raw.saved : [] };
+  if (raw) state = { s: { ...DEFAULTS, ...migrate(raw.s || {}) }, out: { ...OUT_DEFAULTS, ...raw.out }, saved: Array.isArray(raw.saved) ? raw.saved : [] };
 } catch { /* storage unavailable: start fresh */ }
 if (!native && state.out.dest !== 'download') state.out.dest = 'download';
 
@@ -68,13 +68,28 @@ const GROUPS = [
     { type: 'toggle', o: true, key: 'batchOn', label: 'Several notebooks at once' },
     { type: 'area', o: true, key: 'batch', label: 'Notebook names, one per line', when: () => state.out.batchOn, hint: 'Creates one template per name with the settings below.' },
   ] },
-  { title: 'Name on the page', rows: [
-    { type: 'seg', key: 'header', label: 'Header', options: HEADERS, grid: true },
-    { type: 'seg', key: 'font', label: 'Typeface', options: [['sans', 'Sans'], ['serif', 'Serif'], ['mono', 'Mono']], when: () => true },
+  { title: 'Name header', rows: [
+    { type: 'seg', key: 'header', label: 'Style', options: HEADERS, grid: true },
+    { type: 'seg', key: 'font', label: 'Typeface', options: [['sans', 'Sans'], ['serif', 'Serif'], ['mono', 'Mono']] },
     { type: 'toggle', key: 'bold', label: 'Bold name' },
     { type: 'step', key: 'headerSize', label: 'Name size', min: 3, max: 25, step: 0.5, unit: 'mm', when: () => state.s.header !== 'none' || state.s.footer !== 'none' },
+    { type: 'step', key: 'headerPadTop', label: 'Space above header', min: 0, max: 60, step: 1, unit: 'mm', hint: 'Added to the top margin. Handy to clear the Notes toolbar.' },
     { type: 'toggle', key: 'headerRule', label: 'Rule under the header', when: () => ['left', 'center', 'right'].includes(state.s.header) },
-    { type: 'seg', key: 'date', label: 'Date in header', options: DATES, when: () => state.s.header !== 'none' || state.s.pattern === 'titleblock' },
+  ] },
+  { title: 'Second line', when: () => state.s.subtitle.trim() !== '', rows: [
+    { type: 'seg', key: 'subAlign', label: 'Alignment', options: SUB_ALIGNS },
+    { type: 'seg', key: 'subBg', label: 'Background', options: SUB_BGS, grid: true },
+    { type: 'step', key: 'subSize', label: 'Text size', min: 2, max: 15, step: 0.5, unit: 'mm' },
+    { type: 'step', key: 'subGap', label: 'Space above', min: 0, max: 20, step: 0.5, unit: 'mm' },
+  ] },
+  { title: 'Date', rows: [
+    { type: 'seg', key: 'dateStyle', label: 'Date field', options: DATE_STYLES, grid: true, hint: 'Write-in styles leave a line to date each page by hand, journal-style.' },
+    { type: 'seg', key: 'datePos', label: 'Position', options: DATE_POSITIONS, when: () => state.s.dateStyle !== 'none' },
+    { type: 'seg', key: 'dateAlign', label: 'Alignment on its row', options: ALIGNS, when: () => state.s.dateStyle !== 'none' && (state.s.datePos === 'row' || state.s.header === 'none') },
+    { type: 'text', key: 'dateLabel', label: 'Label', hint: 'Shown before the line, e.g. Date, Day, Entry. Leave empty for just the line.', when: () => state.s.dateStyle !== 'none' },
+    { type: 'step', key: 'dateSize', label: 'Date size', min: 2, max: 12, step: 0.5, unit: 'mm', when: () => state.s.dateStyle !== 'none' },
+  ] },
+  { title: 'Watermark & footer', rows: [
     { type: 'seg', key: 'watermark', label: 'Watermark', options: WATERMARKS, grid: true },
     { type: 'step', key: 'watermarkSize', label: 'Watermark size', min: 6, max: 90, step: 2, unit: 'mm', when: () => state.s.watermark !== 'none' },
     { type: 'seg', key: 'watermarkShade', label: 'Watermark shade', options: SHADES_MARK, when: () => state.s.watermark !== 'none' },
@@ -137,7 +152,7 @@ function rowFor(row) {
 
   if (row.type === 'text') {
     const input = el('input', { type: 'text', autocomplete: 'off', spellcheck: 'false', value: S[row.key] ?? '' });
-    input.addEventListener('input', () => { S[row.key] = input.value; persist(); schedulePreview(); updateCreate(); });
+    input.addEventListener('input', () => { S[row.key] = input.value; persist(); refreshGroups(); schedulePreview(); updateCreate(); });
     wrap.append(input);
   } else if (row.type === 'area') {
     const ta = el('textarea', { spellcheck: 'false' });
@@ -245,11 +260,19 @@ function rowFor(row) {
 function buildPanel() {
   const top = panel.scrollTop;
   refreshers.length = 0;
-  panel.replaceChildren(...GROUPS.map((g) => el('section', { class: 'group' }, el('h2', {}, g.title), ...g.rows.map(rowFor))));
+  panel.replaceChildren(...GROUPS.map((g) => {
+    const sec = el('section', { class: 'group' }, el('h2', {}, g.title), ...g.rows.map(rowFor));
+    sec._when = g.when;
+    return sec;
+  }));
   refreshPanel();
   panel.scrollTop = top;
 }
+function refreshGroups() {
+  for (const sec of panel.children) sec.hidden = sec._when ? !sec._when() : false;
+}
 function refreshPanel() {
+  refreshGroups();
   refreshers.forEach((f) => f());
   updateCreate();
 }
@@ -267,7 +290,7 @@ function saveSetup() {
 function loadSetup(i) {
   const it = state.saved[i];
   if (!it) return;
-  state.s = { ...DEFAULTS, ...it.s };
+  state.s = { ...DEFAULTS, ...migrate(it.s || {}) };
   Object.assign(state.out, it.out || {});
   changed({ rebuild: true });
   setStatus(`Loaded "${it.label}".`);

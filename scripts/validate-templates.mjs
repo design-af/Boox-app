@@ -2,7 +2,7 @@
 // Renders every pattern × name placement against a recording mock canvas and checks that
 // nothing throws, every coordinate is a finite number, and the notebook name actually lands
 // on the page. Then builds a small PDF and checks its structure and xref offsets.
-import { render, PATTERNS, HEADERS, WATERMARKS, FOOTERS, DATES, DEFAULTS, usesPageNumbers, safeFileName, resolveText } from '../public/tools/templates/render.js';
+import { render, PATTERNS, HEADERS, WATERMARKS, FOOTERS, DATE_STYLES, DATE_POSITIONS, SUB_ALIGNS, SUB_BGS, DEFAULTS, migrate, usesPageNumbers, safeFileName, resolveText } from '../public/tools/templates/render.js';
 import { buildPdf } from '../public/tools/templates/pdf.js';
 
 let failures = 0;
@@ -41,7 +41,9 @@ for (const [pattern] of PATTERNS) {
     for (const [watermark] of WATERMARKS) {
       for (const [footer] of FOOTERS) {
         for (const sz of sizes) {
-          const s = { name: NAME, subtitle: 'Job {year} · p{page}', pattern, header, watermark, footer, date: DATES[renders % DATES.length][0], leftRule: true };
+          const s = { name: NAME, subtitle: 'Job {year} · p{page}', pattern, header, watermark, footer, leftRule: true,
+            dateStyle: DATE_STYLES[renders % DATE_STYLES.length][0], datePos: DATE_POSITIONS[(renders >> 2) % DATE_POSITIONS.length][0],
+            subAlign: SUB_ALIGNS[renders % SUB_ALIGNS.length][0], subBg: SUB_BGS[(renders >> 1) % SUB_BGS.length][0], headerPadTop: renders % 3 ? 0 : 12 };
           const ctx = mockCtx(sz.W, sz.H);
           try {
             render(ctx, sz.W, sz.H, s, { ppi: sz.ppi, page: 2, pages: 10, date: 'Nov 3, 2026', year: '2026' });
@@ -68,6 +70,28 @@ for (const extra of [{ marginTop: 40, marginSide: 40, marginBottom: 40, headerSi
     if (ctx.bad) fail(`extreme ${JSON.stringify(extra)} ${pattern}: non-finite ${ctx.bad}`);
   }
 }
+
+// Every date style × position × header draws its label.
+for (const [dateStyle] of DATE_STYLES.filter(([v]) => v !== 'none')) {
+  for (const [datePos] of DATE_POSITIONS) {
+    for (const [header] of HEADERS) {
+      const ctx = mockCtx(1860, 2480);
+      render(ctx, 1860, 2480, { name: 'Journal', header, dateStyle, datePos, dateLabel: 'Entry' }, { ppi: 300, date: 'Nov 3, 2026' });
+      if (ctx.bad) fail(`date ${dateStyle}/${datePos}/${header}: non-finite ${ctx.bad}`);
+      if (!ctx.texts.includes('Entry')) fail(`date ${dateStyle}/${datePos}/${header}: label not drawn`);
+      // On a tiny page nothing may be drawn left of the page edge.
+      const small = mockCtx(300, 400);
+      const xs = [];
+      small.fillText = (t, x) => xs.push(x);
+      const fr = small.fillRect;
+      small.fillRect = (x, y, w, h) => { xs.push(x); fr(x, y, w, h); };
+      render(small, 300, 400, { name: 'Journal', header, dateStyle, datePos, dateLabel: 'Entry', marginSide: 2 }, { ppi: 50, date: 'Nov 3, 2026' });
+      if (xs.some((x) => x < -0.5)) fail(`date ${dateStyle}/${datePos}/${header}: drawn off the left edge on a small page`);
+    }
+  }
+}
+// Build 14 settings migrate to the new date field.
+if (migrate({ date: 'blank' }).dateStyle !== 'line' || 'date' in migrate({ date: 'today' })) fail('migrate old date setting');
 
 // Helpers
 if (safeFileName('a/b:c*?"<>|d') !== 'a b c d') fail(`safeFileName: ${safeFileName('a/b:c*?"<>|d')}`);

@@ -28,7 +28,11 @@ export const WATERMARKS = [
   ['none', 'None'], ['center', 'Centre'], ['diagonal', 'Diagonal'], ['tile', 'Repeat'], ['spine', 'Spine'],
 ];
 export const FOOTERS = [['none', 'None'], ['name', 'Name'], ['page', 'Page no.'], ['both', 'Both']];
-export const DATES = [['none', 'None'], ['blank', 'Blank line'], ['today', "Today's date"]];
+export const SUB_ALIGNS = [['same', 'Match name'], ['left', 'Left'], ['center', 'Centre'], ['right', 'Right']];
+export const SUB_BGS = [['none', 'None'], ['band', 'Grey band'], ['black', 'Black band'], ['outline', 'Outline box'], ['tag', 'Black tag']];
+export const DATE_STYLES = [['none', 'None'], ['line', 'Write-in line'], ['boxes', '__ / __ / __'], ['weekdays', 'Line + weekdays'], ['today', "Today's date"]];
+export const DATE_POSITIONS = [['header', 'In header'], ['row', 'Own row'], ['footer', 'Footer']];
+export const ALIGNS = [['left', 'Left'], ['center', 'Centre'], ['right', 'Right']];
 
 export const DEFAULTS = {
   name: 'Notebook',
@@ -37,8 +41,17 @@ export const DEFAULTS = {
   bold: true,
   header: 'left',
   headerSize: 7, // mm, name height
+  headerPadTop: 0, // mm of extra space above the header
   headerRule: true,
-  date: 'none',
+  subAlign: 'same',
+  subSize: 4, // mm
+  subGap: 1.5, // mm above the second line
+  subBg: 'none',
+  dateStyle: 'none',
+  datePos: 'header',
+  dateAlign: 'right', // for datePos 'row'
+  dateLabel: 'Date',
+  dateSize: 3.5, // mm
   watermark: 'none',
   watermarkSize: 28, // mm
   watermarkShade: 228, // 0 black … 255 white
@@ -53,6 +66,19 @@ export const DEFAULTS = {
   marginSide: 8,
   marginBottom: 8,
 };
+
+/** Settings saved by build 14 used a single `date` key. */
+export function migrate(s) {
+  const out = { ...s };
+  if ('date' in out) {
+    if (out.dateStyle === undefined) {
+      if (out.date === 'blank') { out.dateStyle = 'line'; out.datePos = 'header'; }
+      else if (out.date === 'today') { out.dateStyle = 'today'; out.datePos = 'header'; }
+    }
+    delete out.date;
+  }
+  return out;
+}
 
 const mix = (v, t) => Math.round(v + (255 - v) * t); // lighten toward white
 const gray = (v) => {
@@ -87,7 +113,7 @@ export function safeFileName(name) {
  * @param o    { ppi, page, pages, date, year }
  */
 export function render(ctx, W, H, input, o = {}) {
-  const s = { ...DEFAULTS, ...input };
+  const s = { ...DEFAULTS, ...migrate(input) };
   const ppi = o.ppi || 300;
   const mm = (v) => (v * ppi) / 25.4;
   const k = ppi / 300;
@@ -110,10 +136,26 @@ export function render(ctx, W, H, input, o = {}) {
 
   if (name && s.watermark !== 'none') drawWatermark(d, page);
 
-  let top = page.y;
-  if (s.header !== 'none' && (name || sub)) top = drawHeader(d, page) + mm(3);
+  // Where the date field goes. "In header" falls back to its own row when there is no name header.
+  const hasDate = s.dateStyle !== 'none' && !(s.dateStyle === 'today' && !o.date);
+  const nameRow = s.header !== 'none' && !!name;
+  d.datePos = !hasDate ? 'none' : s.datePos === 'header' && !nameRow ? 'row' : s.datePos;
+
+  let top = page.y + mm(s.headerPadTop);
+  const startTop = top;
+  if (nameRow) top = drawNameRow(d, page, top);
+  if (sub) top = drawSubRow(d, page, top + (top > startTop ? mm(s.subGap) : 0));
+  if (d.datePos === 'row') top = drawDateRow(d, page, top + (top > startTop ? mm(s.subGap) : 0));
+  if (top > startTop && s.headerRule && ['left', 'center', 'right'].includes(s.header)) {
+    const rw = lw * 2;
+    ctx.fillStyle = '#000';
+    ctx.fillRect(page.x, Math.round(top + mm(1)), page.w, rw);
+    top += mm(1) + rw;
+  }
+  if (top > page.y) top += mm(3);
+
   let bottom = page.y + page.h;
-  if (s.footer !== 'none') bottom = drawFooter(d, page) - mm(2);
+  if (s.footer !== 'none' || d.datePos === 'footer') bottom = drawFooter(d, page) - mm(2);
 
   const R = { x: page.x, y: top, w: page.w, h: bottom - top };
   if (R.w > mm(5) && R.h > mm(5)) drawPattern(d, R);
@@ -131,7 +173,7 @@ function fit(d, text, weight, px, maxW) {
   setFont(d, weight, px);
   const w = d.ctx.measureText(text).width;
   if (w > maxW && w > 0) {
-    px = Math.max(px * 0.3, (px * maxW) / w);
+    px = Math.max(px * 0.3, (px * maxW) / Math.max(w, 1e-6));
     setFont(d, weight, px);
   }
   return px;
@@ -139,135 +181,216 @@ function fit(d, text, weight, px, maxW) {
 function textW(d, text) {
   return d.ctx.measureText(text).width;
 }
-function dateText(d) {
-  if (d.s.date === 'today') return d.o.date || '';
-  if (d.s.date === 'blank') return 'Date ____________';
-  return '';
+
+/* ---------- date field ---------- */
+
+/**
+ * Lays out the date field at size px. Returns { w, draw(x, baseline, align, color) }.
+ * Handwritten styles are a label plus underline slots to write on.
+ */
+function dateField(d, px, maxW = Infinity) {
+  const f = layoutDate(d, px);
+  return f.w > maxW && f.w > 0 ? layoutDate(d, Math.max(px * 0.3, (px * maxW) / f.w)) : f;
+}
+function layoutDate(d, px) {
+  const { ctx, s, lw } = d;
+  const label = String(s.dateLabel ?? '').trim();
+  const rule = Math.max(1, lw);
+  const parts = []; // { kind: 'text'|'slot', text?, w }
+  const gap = px * 0.35;
+  setFont(d, 400, px);
+  const text = (t) => parts.push({ kind: 'text', text: t, w: textW(d, t) });
+  const slot = (w) => parts.push({ kind: 'slot', w });
+  const space = (w) => parts.push({ kind: 'space', w });
+
+  if (s.dateStyle === 'today') {
+    if (label) { text(label); space(gap); }
+    text(d.o.date || '');
+  } else {
+    if (label) { text(label); space(gap); }
+    if (s.dateStyle === 'boxes') {
+      slot(px * 1.7); space(gap * 0.6); text('/'); space(gap * 0.6);
+      slot(px * 1.7); space(gap * 0.6); text('/'); space(gap * 0.6);
+      slot(px * 2.2);
+    } else {
+      slot(px * 7.5);
+    }
+    if (s.dateStyle === 'weekdays') {
+      for (const day of ['M', 'T', 'W', 'T', 'F', 'S', 'S']) { space(px * 0.75); text(day); }
+    }
+  }
+  const w = parts.reduce((a, p) => a + p.w, 0);
+  return {
+    w,
+    draw(x, base, align, color) {
+      let cx = align === 'right' ? x - w : align === 'center' ? x - w / 2 : x;
+      ctx.save();
+      setFont(d, 400, px);
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'alphabetic';
+      ctx.fillStyle = color;
+      for (const p of parts) {
+        if (p.kind === 'text') ctx.fillText(p.text, cx, base);
+        if (p.kind === 'slot') ctx.fillRect(cx, Math.round(base + px * 0.12), p.w, rule);
+        cx += p.w;
+      }
+      ctx.restore();
+    },
+  };
 }
 
-/* ---------- header / footer ---------- */
+function nameAlign(s) {
+  return s.header === 'center' ? 'center' : s.header === 'right' || s.header === 'tab' ? 'right' : 'left';
+}
+function xFor(page, align, inset = 0) {
+  return align === 'center' ? page.x + page.w / 2 : align === 'right' ? page.x + page.w - inset : page.x + inset;
+}
 
-function drawHeader(d, page) {
-  const { ctx, s, mm, lw, name, sub } = d;
+/* ---------- header rows ---------- */
+
+function drawNameRow(d, page, y) {
+  const { ctx, s, mm, lw, name } = d;
   const px0 = mm(s.headerSize);
-  const subPx = px0 * 0.55;
-  const datePx = Math.max(mm(2.6), px0 * 0.42);
-  const date = dateText(d);
+  const datePx = mm(s.dateSize);
+  const date = d.datePos === 'header' ? dateField(d, datePx, page.w * 0.55) : null;
   ctx.textBaseline = 'alphabetic';
-
-  setFont(d, 400, datePx);
-  const dateW = date ? textW(d, date) : 0;
 
   if (s.header === 'bar') {
     const pad = px0 * 0.45;
-    const barH = pad * 2 + px0 * 0.95 + (sub ? subPx * 1.3 : 0);
+    const barH = pad * 2 + px0 * 0.95;
     ctx.fillStyle = '#000';
-    ctx.fillRect(page.x, page.y, page.w, barH);
+    ctx.fillRect(page.x, y, page.w, barH);
+    const base = y + pad + px0 * 0.8;
+    const avail = page.w - pad * 2 - (date ? date.w + pad * 2 : 0);
     ctx.fillStyle = '#fff';
     ctx.textAlign = 'left';
-    const avail = page.w - pad * 2 - (date ? dateW + pad : 0);
-    const base = page.y + pad + px0 * 0.8;
-    if (name) {
-      fit(d, name, d.nameWeight, px0, avail);
-      ctx.fillText(name, page.x + pad, base);
-    }
-    if (sub) {
-      fit(d, sub, 400, subPx, avail);
-      ctx.fillText(sub, page.x + pad, (name ? base : page.y + pad) + subPx * 1.3);
-    }
-    if (date) {
-      setFont(d, 400, datePx);
-      ctx.textAlign = 'right';
-      ctx.fillText(date, page.x + page.w - pad, base);
-    }
-    return page.y + barH;
+    fit(d, name, d.nameWeight, px0, avail);
+    ctx.fillText(name, page.x + pad, base);
+    date?.draw(page.x + page.w - pad, base, 'right', '#fff');
+    return y + barH;
   }
 
   if (s.header === 'tab') {
     const pad = px0 * 0.45;
     const maxText = page.w * 0.62 - pad * 2;
-    let nw = 0, sw = 0, npx = px0, spx = subPx;
-    if (name) { npx = fit(d, name, d.nameWeight, px0, maxText); nw = textW(d, name); }
-    if (sub) { spx = fit(d, sub, 400, subPx, maxText); sw = textW(d, sub); }
-    const boxW = Math.max(nw, sw) + pad * 2;
-    const boxH = pad * 2 + (name ? npx * 0.95 : 0) + (sub ? spx * 1.3 : 0);
+    const npx = fit(d, name, d.nameWeight, px0, maxText);
+    const boxW = textW(d, name) + pad * 2;
+    const boxH = pad * 2 + npx * 0.95;
     const x = page.x + page.w - boxW;
     const bw = lw * 2;
     ctx.strokeStyle = '#000';
     ctx.lineWidth = bw;
-    ctx.strokeRect(x + bw / 2, page.y + bw / 2, boxW - bw, boxH - bw);
+    ctx.strokeRect(x + bw / 2, y + bw / 2, boxW - bw, boxH - bw);
     ctx.fillStyle = '#000';
     ctx.textAlign = 'left';
-    let y = page.y + pad;
-    if (name) { setFont(d, d.nameWeight, npx); y += npx * 0.8; ctx.fillText(name, x + pad, y); y += npx * 0.15; }
-    if (sub) { setFont(d, 400, spx); y += spx * 1.15; ctx.fillText(sub, x + pad, y); }
-    if (date) {
-      setFont(d, 400, datePx);
-      ctx.fillStyle = gray(d.labelShade);
-      ctx.fillText(date, page.x, page.y + boxH - pad);
-    }
-    return page.y + boxH;
+    ctx.fillText(name, x + pad, y + pad + npx * 0.8);
+    date?.draw(page.x, y + boxH - pad, 'left', '#000');
+    return y + boxH;
   }
 
-  // left / center / right: text on the page with an optional rule under it
+  // left / center / right: the date sits on the opposite side.
   const gap = mm(4);
-  const avail = s.header === 'center' ? page.w - 2 * (date ? dateW + gap : 0) : page.w - (date ? dateW + gap : 0);
-  const x = s.header === 'center' ? page.x + page.w / 2 : s.header === 'right' ? page.x + page.w : page.x;
-  ctx.textAlign = s.header === 'center' ? 'center' : s.header === 'right' ? 'right' : 'left';
+  const align = nameAlign(s);
+  const dw = date ? date.w + gap : 0;
+  const avail = align === 'center' ? page.w - 2 * dw : page.w - dw;
+  const px = fit(d, name, d.nameWeight, px0, avail);
+  const base = y + px * 0.82;
   ctx.fillStyle = '#000';
-  let base = page.y;
-  let firstBase = page.y + datePx;
-  if (name) {
-    const px = fit(d, name, d.nameWeight, px0, avail);
-    base += px * 0.82;
-    firstBase = base;
-    ctx.fillText(name, x, base);
-  }
-  if (sub) {
-    fit(d, sub, 400, subPx, avail);
-    ctx.fillStyle = gray(Math.min(d.labelShade, 70));
-    base += (name ? subPx * 1.35 : subPx * 0.82);
-    ctx.fillText(sub, x, base);
-  }
+  ctx.textAlign = align;
+  ctx.fillText(name, xFor(page, align), base);
   if (date) {
-    setFont(d, 400, datePx);
-    ctx.fillStyle = gray(d.labelShade);
-    ctx.textAlign = s.header === 'right' ? 'left' : 'right';
-    ctx.fillText(date, s.header === 'right' ? page.x : page.x + page.w, firstBase);
+    if (align === 'right') date.draw(page.x, base, 'left', '#000');
+    else date.draw(page.x + page.w, base, 'right', '#000');
   }
-  let bottom = base + px0 * 0.32;
-  if (s.headerRule) {
-    const rw = lw * 2;
-    ctx.fillStyle = '#000';
-    ctx.fillRect(page.x, Math.round(bottom), page.w, rw);
-    bottom += rw;
+  return y + px * 1.05;
+}
+
+function drawSubRow(d, page, y) {
+  const { ctx, s, mm, lw, sub } = d;
+  const px0 = mm(s.subSize);
+  let align = s.subAlign === 'same' ? (s.header === 'none' ? 'left' : nameAlign(s)) : s.subAlign;
+  const bg = s.subBg;
+  const padV = bg === 'none' ? 0 : px0 * 0.4;
+  const padH = bg === 'none' ? 0 : px0 * 0.6;
+  const px = fit(d, sub, 400, px0, page.w - padH * 2);
+  const tw = textW(d, sub);
+  const h = bg === 'none' ? px * 1.1 : padV * 2 + px * 1.0;
+  const base = y + padV + px * 0.8;
+  let ink = gray(Math.min(d.labelShade, 70));
+
+  if (bg === 'band' || bg === 'black') {
+    ctx.fillStyle = bg === 'black' ? '#000' : gray(222);
+    ctx.fillRect(page.x, y, page.w, h);
+    ink = bg === 'black' ? '#fff' : '#000';
+  } else if (bg === 'outline' || bg === 'tag') {
+    const bw = tw + padH * 2;
+    const bx = align === 'center' ? page.x + (page.w - bw) / 2 : align === 'right' ? page.x + page.w - bw : page.x;
+    if (bg === 'tag') {
+      ctx.fillStyle = '#000';
+      ctx.fillRect(bx, y, bw, h);
+      ink = '#fff';
+    } else {
+      const sw = Math.max(1, lw);
+      ctx.strokeStyle = '#000';
+      ctx.lineWidth = sw;
+      ctx.strokeRect(bx + sw / 2, y + sw / 2, bw - sw, h - sw);
+      ink = '#000';
+    }
   }
-  return bottom;
+  ctx.fillStyle = ink;
+  ctx.textAlign = align;
+  ctx.textBaseline = 'alphabetic';
+  setFont(d, 400, px);
+  ctx.fillText(sub, xFor(page, align, padH), base);
+  return y + h;
+}
+
+function drawDateRow(d, page, y) {
+  const px = d.mm(d.s.dateSize);
+  const f = dateField(d, px, page.w);
+  const align = d.s.dateAlign || 'right';
+  f.draw(xFor(page, align), y + px * 1.0, align, '#000');
+  return y + px * 1.35;
 }
 
 function drawFooter(d, page) {
   const { ctx, s, mm, lw, name, o } = d;
   const px = Math.max(mm(2.6), mm(s.headerSize) * 0.42);
+  const datePx = Math.min(mm(s.dateSize), px * 1.4);
   const base = page.y + page.h - px * 0.25;
-  const top = base - px * 1.05 - mm(1.5);
+  const top = base - Math.max(px, datePx) * 1.05 - mm(1.5);
   ctx.fillStyle = gray(d.labelShade);
   ctx.textBaseline = 'alphabetic';
+  let leftEnd = page.x;
+  let rightStart = page.x + page.w;
   if ((s.footer === 'name' || s.footer === 'both') && name) {
     ctx.textAlign = 'left';
-    fit(d, name, 400, px, page.w * 0.7);
+    fit(d, name, 400, px, page.w * (d.datePos === 'footer' ? 0.4 : 0.7));
     ctx.fillText(name, page.x, base);
+    leftEnd = page.x + textW(d, name);
   }
   if (s.footer === 'page' || s.footer === 'both') {
     setFont(d, 400, px);
     ctx.textAlign = 'right';
     if (o.pages) {
-      ctx.fillText(`${o.page || 1} / ${o.pages}`, page.x + page.w, base);
+      const t = `${o.page || 1} / ${o.pages}`;
+      ctx.fillText(t, page.x + page.w, base);
+      rightStart -= textW(d, t);
     } else {
       // A slot to number the page by hand.
       const slot = px * 3;
       ctx.fillText('p.', page.x + page.w - slot - px * 0.3, base);
       ctx.fillRect(page.x + page.w - slot, Math.round(base), slot, Math.max(1, lw));
+      rightStart -= slot + px * 1.3;
     }
+  }
+  if (d.datePos === 'footer') {
+    const f = dateField(d, datePx, page.w * 0.5);
+    // Centre it unless that would hit the name or page number.
+    const mid = page.x + page.w / 2;
+    if (mid - f.w / 2 > leftEnd + mm(3) && mid + f.w / 2 < rightStart - mm(3)) f.draw(mid, base, 'center', '#000');
+    else if (leftEnd === page.x) f.draw(page.x, base, 'left', '#000');
+    else f.draw(rightStart - mm(3), base, 'right', '#000');
   }
   ctx.fillStyle = gray(mix(s.lineShade, 0.3));
   ctx.fillRect(page.x, Math.round(top), page.w, Math.max(1, lw));
@@ -500,7 +623,7 @@ function drawPattern(d, R) {
       const values = {
         PROJECT: d.name,
         SHEET: d.o.pages ? `${d.o.page || 1} / ${d.o.pages}` : '',
-        DATE: d.s.date === 'today' ? d.o.date || '' : '',
+        DATE: d.s.dateStyle === 'today' ? d.o.date || '' : '',
         SCALE: '',
       };
       cells.forEach(([key, frac], i) => {
