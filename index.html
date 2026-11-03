@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <title>Boox App</title>
+    <title>AFS Custom Boox Tools</title>
     <link rel="stylesheet" href="/src/style.css" />
   </head>
   <body>
@@ -13,23 +13,25 @@
     </div>
 
     <main>
-      <h1>Boox App</h1>
-      <p class="muted">Built in Claude, shipped by GitHub Actions.</p>
+      <h1>AFS Custom Boox Tools</h1>
+      <p class="muted">Tools built for the Boox Air 6C. Tap one to open it.</p>
+
+      <nav class="tools" aria-label="Tools">
+        <!-- Each tool lives in public/tools/<name>/ and is copied into the APK as-is. -->
+        <a class="tool" href="tools/are/index.html">
+          <span class="tool-code">ARE</span>
+          <span class="tool-meta">
+            <span class="tool-name">ARE Prep Tools</span>
+            <span class="tool-sub">All six ARE 5.0 divisions: chapters, flashcards, quizzes, case studies and timed practice exams.</span>
+          </span>
+          <span class="tool-go" aria-hidden="true">&rarr;</span>
+        </a>
+      </nav>
 
       <section class="card">
-        <h2>Version</h2>
+        <h2>This app</h2>
         <p id="version">…</p>
         <button id="check-btn">Check for updates</button>
-      </section>
-
-      <section class="card">
-        <h2>Update test</h2>
-        <p>If you can read this, build 4 updated over build 3 without reinstalling.</p>
-      </section>
-
-      <section class="card">
-        <h2>Start here</h2>
-        <p>Replace this screen in <code>src/main.js</code>. Every push to <code>main</code> builds a new signed APK.</p>
       </section>
     </main>
 

@@ -1,13 +1,13 @@
 {
-  "name": "boox-app",
+  "name": "afs-custom-boox-tools",
   "version": "1.0.0",
-  "description": "",
+  "description": "AFS Custom Boox Tools \u2014 a hub of e-ink tools for the Boox Air 6C",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "node scripts/validate-are.mjs",
     "build": "vite build",
     "dev": "vite",
-    "sync": "vite build && cap sync android"
+    "sync": "npm test && vite build && cap sync android"
   },
   "keywords": [],
   "author": "",

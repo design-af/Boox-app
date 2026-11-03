@@ -60,3 +60,30 @@ code { font-size: 0.9em; border-bottom: 1px solid var(--ink); }
 }
 #update-banner[hidden] { display: none; }
 #update-banner button { background: var(--paper); color: var(--ink); border-color: var(--paper); }
+
+/* Tool launcher */
+.tools { display: flex; flex-direction: column; gap: 14px; margin: 24px 0; }
+.tool {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  min-height: 96px;
+  padding: 16px;
+  border: 3px solid var(--ink);
+  color: var(--ink);
+  text-decoration: none;
+}
+.tool:active { background: var(--ink); color: var(--paper); }
+.tool:active .tool-code { border-color: var(--paper); }
+.tool-code {
+  flex: none;
+  font: 700 1.1rem/1 ui-monospace, "Courier New", monospace;
+  border: 3px solid var(--ink);
+  padding: 10px 8px;
+  min-width: 4.2em;
+  text-align: center;
+}
+.tool-meta { flex: 1; min-width: 0; }
+.tool-name { display: block; font-weight: 700; font-size: 1.15rem; }
+.tool-sub { display: block; font-size: 0.9rem; margin-top: 4px; }
+.tool-go { flex: none; font-size: 1.6rem; font-weight: 700; }

@@ -1,6 +1,6 @@
 {
   "appId": "af.design.boox",
-  "appName": "Boox App",
+  "appName": "AFS Custom Boox Tools",
   "webDir": "dist",
   "android": {
     "backgroundColor": "#ffffff"
