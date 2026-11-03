@@ -202,7 +202,7 @@ tbody tr:last-child td{border-bottom:0}
 #inkwrap{position:relative}
 #inklayer{position:absolute;left:0;top:0;width:100%;pointer-events:none;overflow:visible}
 body.inking #inklayer{pointer-events:auto;touch-action:none;cursor:crosshair}
-body.inking #inkwrap{outline:2px dashed var(--ink);outline-offset:6px}
+body.inking #inkwrap{box-shadow:-6px 0 0 0 var(--ink)}
 .ink-pen{fill:none;stroke:var(--ink);stroke-width:3.2;stroke-linecap:round;stroke-linejoin:round}
 .ink-hl{fill:none;stroke:#ffd84d;stroke-width:22;stroke-linecap:butt;stroke-linejoin:round;opacity:.6}
 #inklayer .hl{mix-blend-mode:multiply}
@@ -1666,20 +1666,27 @@ function inkD(p){
   return d;
 }
 function inkPath(st){ return '<path class="' + (st.t === "hl" ? "ink-hl" : "ink-pen") + '" d="' + inkD(st.p) + '"/>'; }
+/* Draw in a 1000-unit-wide space scaled by a plain transform, never by viewBox fitting, so a pen
+   point always lands exactly under the pen whatever the layer's height. */
+var inkScale = 1;
 function inkLayout(){
   var w = document.getElementById("inkwrap"), svg = document.getElementById("inklayer");
   if(!w || !svg) return;
   var W = w.clientWidth || 1, H = w.scrollHeight || 1;
-  svg.setAttribute("viewBox", "0 0 1000 " + Math.round(H * 1000 / W));
+  inkScale = W / 1000;
+  svg.setAttribute("width", W); svg.setAttribute("height", H);
+  svg.removeAttribute("viewBox");
   svg.style.height = H + "px";
+  var g = svg.querySelector(".sc"); if(g) g.setAttribute("transform", "scale(" + inkScale + ")");
 }
 function inkDraw(){
   var svg = document.getElementById("inklayer"); if(!svg) return;
   var list = INKS[inkKey()] || [];
-  svg.innerHTML = '<g class="hl">' + list.filter(function(x){ return x.t === "hl"; }).map(inkPath).join("") + "</g>"
-    + '<g class="pn">' + list.filter(function(x){ return x.t !== "hl"; }).map(inkPath).join("") + "</g>";
+  svg.innerHTML = '<g class="sc" transform="scale(' + inkScale + ')"><g class="hl">' + list.filter(function(x){ return x.t === "hl"; }).map(inkPath).join("") + "</g>"
+    + '<g class="pn">' + list.filter(function(x){ return x.t !== "hl"; }).map(inkPath).join("") + "</g></g>";
 }
 function inkRefresh(){ inkLayout(); inkDraw(); }
+var inkPen = false;   // once a stylus is seen, fingers and palms no longer draw
 function inkMode(on){
   inkOn = !!on && route.v === "read";
   document.body.classList.toggle("inking", inkOn);
@@ -1693,8 +1700,8 @@ function inkTools(){
     if(k === "pen" || k === "hl" || k === "erase") bs[i].setAttribute("aria-pressed", k === inkTool ? "true" : "false");
   }
 }
-function inkPt(e, svg){
-  var r = svg.getBoundingClientRect(), k = 1000 / (r.width || 1);
+function inkPt(e, r){
+  var k = 1000 / (r.width || 1);
   return [Math.round((e.clientX - r.left) * k * 10) / 10, Math.round((e.clientY - r.top) * k * 10) / 10];
 }
 function inkErase(pt){
@@ -1711,33 +1718,48 @@ function inkErase(pt){
 }
 document.addEventListener("pointerdown", function(e){
   if(!inkOn || e.target.closest("#inklayer") === null) return;
-  var svg = document.getElementById("inklayer"), pt = inkPt(e, svg);
   e.preventDefault();
+  if(e.pointerType === "pen") inkPen = true;
+  else if(inkPen) return;                       // palm or finger while using the stylus: ignore
+  if(inkCur){
+    if(e.pointerType !== "pen") return;
+    if(inkCur.el && inkCur.el.parentNode) inkCur.el.parentNode.removeChild(inkCur.el);   // a palm got there first
+    inkCur = null;
+  }
+  var svg = document.getElementById("inklayer"), r = svg.getBoundingClientRect(), pt = inkPt(e, r);
   try{ svg.setPointerCapture(e.pointerId); }catch(err){}
-  if(inkTool === "erase"){ inkCur = { erase:true, id:e.pointerId, hit:0 }; inkCur.hit += inkErase(pt); return; }
-  inkCur = { id:e.pointerId, st:{ t:inkTool, p:pt.slice() } };
+  if(inkTool === "erase"){ inkCur = { erase:true, id:e.pointerId, hit:0, r:r }; inkCur.hit += inkErase(pt); return; }
+  inkCur = { id:e.pointerId, r:r, st:{ t:inkTool, p:pt.slice() }, d:"", frame:0 };
   var g = svg.querySelector(inkTool === "hl" ? ".hl" : ".pn");
   g.insertAdjacentHTML("beforeend", inkPath(inkCur.st));
-  inkCur.el = g.lastChild;
+  inkCur.el = g.lastChild; inkCur.d = inkCur.el.getAttribute("d").replace(/ l0\.1 0$/, "");
 }, { passive:false });
 document.addEventListener("pointermove", function(e){
   if(!inkCur || e.pointerId !== inkCur.id) return;
-  var svg = document.getElementById("inklayer"); if(!svg) return;
   e.preventDefault();
   var evs = e.getCoalescedEvents ? e.getCoalescedEvents() : [e]; if(!evs.length) evs = [e];
   for(var i = 0; i < evs.length; i++){
-    var pt = inkPt(evs[i], svg);
+    var pt = inkPt(evs[i], inkCur.r);
     if(inkCur.erase){ inkCur.hit += inkErase(pt); continue; }
     var p = inkCur.st.p, lx = p[p.length - 2], ly = p[p.length - 1];
     if((pt[0] - lx) * (pt[0] - lx) + (pt[1] - ly) * (pt[1] - ly) < 4) continue;
     if(inkCur.st.t === "hl") pt[1] = p[1] + (pt[1] - p[1]) * 0.15;   // marker lines stay near level
     p.push(pt[0], pt[1]);
+    inkCur.d += " L" + pt[0] + " " + pt[1];
   }
-  if(inkCur.el) inkCur.el.setAttribute("d", inkD(inkCur.st.p));
+  /* one DOM update per frame, however many points arrived */
+  if(!inkCur.erase && !inkCur.frame){
+    var c = inkCur;
+    c.frame = requestAnimationFrame(function(){ c.frame = 0; if(c.el) c.el.setAttribute("d", c.d); });
+  }
 }, { passive:false });
+/* if the page scrolls mid-stroke, re-measure so points stay under the pen */
+document.addEventListener("scroll", function(){ if(inkCur){ var svg = document.getElementById("inklayer"); if(svg) inkCur.r = svg.getBoundingClientRect(); } }, true);
 function inkEnd(e){
   if(!inkCur || e.pointerId !== inkCur.id) return;
   var c = inkCur; inkCur = null;
+  if(c.frame){ cancelAnimationFrame(c.frame); }
+  if(c.el && !c.erase) c.el.setAttribute("d", inkD(c.st.p));
   if(c.erase){ if(c.hit) inkSave(); return; }
   var key = inkKey(); if(!key) return;
   (INKS[key] = INKS[key] || []).push(c.st);
