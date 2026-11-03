@@ -198,6 +198,21 @@ tbody tr:last-child td{border-bottom:0}
 .vlist .kv{gap:10px}
 .vlist .vname{font-family:var(--sans);font-weight:600}
 .vlist .vtags{display:block;font-family:var(--sans);font-size:.72em;color:var(--ink-2);margin-top:2px}
+/* ink layer: your own pen strokes and highlights, saved per chapter page */
+#inkwrap{position:relative}
+#inklayer{position:absolute;left:0;top:0;width:100%;pointer-events:none;overflow:visible}
+body.inking #inklayer{pointer-events:auto;touch-action:none;cursor:crosshair}
+body.inking #inkwrap{outline:2px dashed var(--ink);outline-offset:6px}
+.ink-pen{fill:none;stroke:var(--ink);stroke-width:3.2;stroke-linecap:round;stroke-linejoin:round}
+.ink-hl{fill:none;stroke:#ffd84d;stroke-width:22;stroke-linecap:butt;stroke-linejoin:round;opacity:.6}
+#inklayer .hl{mix-blend-mode:multiply}
+:root[data-eink="on"] .ink-hl{stroke:#a8a8a8;opacity:.7}
+:root[data-theme="dark"] #inklayer .hl{mix-blend-mode:screen}
+.inktools{display:none;flex:1;min-width:0;gap:6px;flex-wrap:wrap;align-items:center}
+.inktools .btn{min-height:40px}
+.inktools [aria-pressed="true"]{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+body.inking .inktools{display:flex}
+body.inking .mast .ttl,body.inking #find,body.inking #gear,body.inking #back,body.inking #inkbtn,body.inking #hub{display:none!important}
 .tapcue{text-align:center;font-family:var(--sans);font-size:.78em;color:var(--ink-2);margin-top:10px}
 .srsrow{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:6px;margin-top:14px}
 .srsrow .btn{padding:8px 4px;text-align:center}
@@ -296,6 +311,15 @@ a.btn{display:inline-flex;align-items:center;justify-content:center;text-decorat
     <a class="btn btn-icon" id="hub" href="../../index.html" aria-label="All tools">&#8962;</a>
     <button class="btn btn-icon" id="back" aria-label="Back">&#8592;</button>
     <div class="ttl"><span class="eyebrow" id="crumb">ARE 5.0</span><b id="htitle">ARE Prep Tools</b></div>
+    <div class="inktools" id="inktools" role="toolbar" aria-label="Ink tools">
+      <button class="btn btn-sm" data-ink="pen" aria-pressed="true">&#9998; Pen</button>
+      <button class="btn btn-sm" data-ink="hl" aria-pressed="false">&#9646; Marker</button>
+      <button class="btn btn-sm" data-ink="erase" aria-pressed="false">&#9003; Eraser</button>
+      <button class="btn btn-sm" data-ink="undo">&#8630; Undo</button>
+      <button class="btn btn-sm" data-ink="clear">Clear</button>
+      <button class="btn btn-sm btn-primary" data-ink="done">Done</button>
+    </div>
+    <button class="btn btn-icon" id="inkbtn" aria-label="Write on this page" hidden>&#9998;</button>
     <button class="btn btn-icon" id="find" aria-label="Search">&#9906;</button>
     <button class="btn btn-icon" id="gear" aria-label="Settings">&#9881;</button>
   </div>
@@ -1043,9 +1067,9 @@ function rowBtn(v, t, label, sub){
 function vRead(){
   var t = topicOf(route); if(!t) return vDiv();
   var blocks = t.read || [], i = Math.min(route.i || 0, blocks.length - 1);
-  var h = (narrFor("chapter", t.id) ? narrErrHTML() : "") + '<div class="read">' + blockHTML(blocks[i], true);
+  var h = (narrFor("chapter", t.id) ? narrErrHTML() : "") + '<div id="inkwrap"><div class="read">' + blockHTML(blocks[i], true);
   (FIGS[t.id] || []).forEach(function(f){ if(f.after === i) h += figHTML(f); });
-  h += "</div>";
+  h += '</div><svg id="inklayer" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"></svg></div>';
   h += '<div class="pager"><button class="btn btn-sm" data-page="' + (i-1) + '"' + (i === 0 ? " disabled" : "") + ">← Back</button>"
     + '<span class="pcount">' + (i+1) + " / " + blocks.length + "</span>";
   if(i < blocks.length - 1){
@@ -1348,7 +1372,9 @@ function render(){
   document.getElementById("back").hidden = (v === "home");
   document.getElementById("hub").hidden = (v !== "home");
   document.getElementById("rail").innerHTML = railFor();
-  if(v === "read") narrMark();
+  document.getElementById("inkbtn").hidden = (v !== "read");
+  if(v !== "read" && inkOn) inkMode(false);
+  if(v === "read"){ inkRefresh(); narrMark(); }
 
   if(v === "run" && run && !run.done && run.view === "q"){
     var it = run.items[run.i];
@@ -1621,6 +1647,128 @@ function vDrill(){
   return { title:title, crumb:crumb, html:h };
 }
 
+/* ---------- ink: pen, marker and eraser on chapter pages ----------
+   Strokes are stored per chapter page in their own localStorage key, in units of 1/1000 of the
+   page width, so they stay on the words they were drawn on when the screen rotates. Changing
+   the text size reflows the words underneath, so ink drawn at one size sits best at that size. */
+var LSI = "are5.ink", INKS = {}, inkOn = false, inkTool = "pen", inkUndo = [], inkCur = null, inkArmed = false;
+try{ INKS = JSON.parse(localStorage.getItem(LSI) || "{}") || {}; }catch(e){ INKS = {}; }
+function inkSave(){
+  try{ localStorage.setItem(LSI, JSON.stringify(INKS)); }
+  catch(e){ var el = document.getElementById("sync"); if(el) el.textContent = "Ink not saved — device storage is full"; }
+}
+function inkKey(){ return route.v === "read" && route.t ? route.t + ":" + (route.i || 0) : null; }
+function inkD(p){
+  if(!p.length) return "";
+  var d = "M" + p[0] + " " + p[1];
+  if(p.length === 2) return d + " l0.1 0";
+  for(var i = 2; i < p.length; i += 2) d += " L" + p[i] + " " + p[i + 1];
+  return d;
+}
+function inkPath(st){ return '<path class="' + (st.t === "hl" ? "ink-hl" : "ink-pen") + '" d="' + inkD(st.p) + '"/>'; }
+function inkLayout(){
+  var w = document.getElementById("inkwrap"), svg = document.getElementById("inklayer");
+  if(!w || !svg) return;
+  var W = w.clientWidth || 1, H = w.scrollHeight || 1;
+  svg.setAttribute("viewBox", "0 0 1000 " + Math.round(H * 1000 / W));
+  svg.style.height = H + "px";
+}
+function inkDraw(){
+  var svg = document.getElementById("inklayer"); if(!svg) return;
+  var list = INKS[inkKey()] || [];
+  svg.innerHTML = '<g class="hl">' + list.filter(function(x){ return x.t === "hl"; }).map(inkPath).join("") + "</g>"
+    + '<g class="pn">' + list.filter(function(x){ return x.t !== "hl"; }).map(inkPath).join("") + "</g>";
+}
+function inkRefresh(){ inkLayout(); inkDraw(); }
+function inkMode(on){
+  inkOn = !!on && route.v === "read";
+  document.body.classList.toggle("inking", inkOn);
+  inkArmed = false; var c = document.querySelector('[data-ink="clear"]'); if(c) c.textContent = "Clear";
+  inkTools();
+}
+function inkTools(){
+  var bs = document.querySelectorAll("[data-ink]");
+  for(var i = 0; i < bs.length; i++){
+    var k = bs[i].getAttribute("data-ink");
+    if(k === "pen" || k === "hl" || k === "erase") bs[i].setAttribute("aria-pressed", k === inkTool ? "true" : "false");
+  }
+}
+function inkPt(e, svg){
+  var r = svg.getBoundingClientRect(), k = 1000 / (r.width || 1);
+  return [Math.round((e.clientX - r.left) * k * 10) / 10, Math.round((e.clientY - r.top) * k * 10) / 10];
+}
+function inkErase(pt){
+  var key = inkKey(), list = INKS[key] || [], gone = [];
+  for(var i = list.length - 1; i >= 0; i--){
+    var p = list[i].p, r = list[i].t === "hl" ? 22 : 14;
+    for(var j = 0; j < p.length; j += 2){
+      var dx = p[j] - pt[0], dy = p[j + 1] - pt[1];
+      if(dx * dx + dy * dy < r * r){ gone.push({ i:i, s:list[i] }); list.splice(i, 1); break; }
+    }
+  }
+  if(gone.length){ inkUndo.push({ k:key, removed:gone }); inkDraw(); }
+  return gone.length;
+}
+document.addEventListener("pointerdown", function(e){
+  if(!inkOn || e.target.closest("#inklayer") === null) return;
+  var svg = document.getElementById("inklayer"), pt = inkPt(e, svg);
+  e.preventDefault();
+  try{ svg.setPointerCapture(e.pointerId); }catch(err){}
+  if(inkTool === "erase"){ inkCur = { erase:true, id:e.pointerId, hit:0 }; inkCur.hit += inkErase(pt); return; }
+  inkCur = { id:e.pointerId, st:{ t:inkTool, p:pt.slice() } };
+  var g = svg.querySelector(inkTool === "hl" ? ".hl" : ".pn");
+  g.insertAdjacentHTML("beforeend", inkPath(inkCur.st));
+  inkCur.el = g.lastChild;
+}, { passive:false });
+document.addEventListener("pointermove", function(e){
+  if(!inkCur || e.pointerId !== inkCur.id) return;
+  var svg = document.getElementById("inklayer"); if(!svg) return;
+  e.preventDefault();
+  var evs = e.getCoalescedEvents ? e.getCoalescedEvents() : [e]; if(!evs.length) evs = [e];
+  for(var i = 0; i < evs.length; i++){
+    var pt = inkPt(evs[i], svg);
+    if(inkCur.erase){ inkCur.hit += inkErase(pt); continue; }
+    var p = inkCur.st.p, lx = p[p.length - 2], ly = p[p.length - 1];
+    if((pt[0] - lx) * (pt[0] - lx) + (pt[1] - ly) * (pt[1] - ly) < 4) continue;
+    if(inkCur.st.t === "hl") pt[1] = p[1] + (pt[1] - p[1]) * 0.15;   // marker lines stay near level
+    p.push(pt[0], pt[1]);
+  }
+  if(inkCur.el) inkCur.el.setAttribute("d", inkD(inkCur.st.p));
+}, { passive:false });
+function inkEnd(e){
+  if(!inkCur || e.pointerId !== inkCur.id) return;
+  var c = inkCur; inkCur = null;
+  if(c.erase){ if(c.hit) inkSave(); return; }
+  var key = inkKey(); if(!key) return;
+  (INKS[key] = INKS[key] || []).push(c.st);
+  inkUndo.push({ k:key, added:c.st });
+  inkSave();
+}
+document.addEventListener("pointerup", inkEnd);
+document.addEventListener("pointercancel", inkEnd);
+window.addEventListener("resize", function(){ if(route.v === "read") inkRefresh(); });
+if(document.fonts && document.fonts.ready) document.fonts.ready.then(function(){ if(route.v === "read") inkRefresh(); });
+function inkAction(a){
+  if(a === "pen" || a === "hl" || a === "erase"){ inkTool = a; inkTools(); return; }
+  if(a === "done"){ inkMode(false); return; }
+  if(a === "undo"){
+    var u = inkUndo.pop(); if(!u) return;
+    var list = INKS[u.k] = INKS[u.k] || [];
+    if(u.added){ var ix = list.indexOf(u.added); if(ix >= 0) list.splice(ix, 1); }
+    if(u.removed) u.removed.slice().reverse().forEach(function(r){ list.splice(Math.min(r.i, list.length), 0, r.s); });
+    if(u.cleared) INKS[u.k] = u.cleared;
+    if(!INKS[u.k].length) delete INKS[u.k];
+    inkSave(); inkDraw(); return;
+  }
+  if(a === "clear"){
+    var key = inkKey(), b = document.querySelector('[data-ink="clear"]');
+    if(!key || !(INKS[key] || []).length) return;
+    if(!inkArmed){ inkArmed = true; if(b) b.textContent = "Tap to clear page"; return; }
+    inkUndo.push({ k:key, cleared:INKS[key] }); delete INKS[key]; inkSave(); inkDraw();
+    inkArmed = false; if(b) b.textContent = "Clear";
+  }
+}
+
 /* ---------- readability test ---------- */
 function vReadTest(){
   var s = prog.settings, fs = SIZES[Math.max(0, Math.min(SIZES.length - 1, s.size))];
@@ -1718,6 +1866,7 @@ function vVoices(){
 /* ---------- back navigation (on-screen button and Android back key) ---------- */
 function goBack(){
   var v = route.v;
+  if(inkOn){ inkMode(false); return; }
   if(v === "home"){ location.href = "../../index.html"; return; }
   if(v === "topic") go({ v:"div", d:route.d });
   else if(v === "read" || v === "cards") go({ v:"topic", d:route.d, t:route.t });
@@ -1741,10 +1890,12 @@ document.addEventListener("visibilitychange", function(){ if(!document.hidden) n
 /* ---------- events ---------- */
 document.addEventListener("click", function(e){
   var el = e.target.closest ? e.target.closest(
-    "[data-go],[data-tab],[data-page],[data-done],[data-pick],[data-multi],[data-item],[data-target],[data-check],[data-rnext],[data-rnav],[data-grade],[data-restart],[data-conf],[data-set],[data-size],[data-io],[data-mock],[data-case],[data-review],[data-again],[data-docs],[data-doc],[data-resume],[data-zone],[data-pass],[data-move],[data-seqreset],[data-listen],[data-nset],[data-voice],[data-type],#flip,#back,#gear,#find") : null;
+    "[data-go],[data-tab],[data-page],[data-done],[data-pick],[data-multi],[data-item],[data-target],[data-check],[data-rnext],[data-rnav],[data-grade],[data-restart],[data-conf],[data-set],[data-size],[data-io],[data-mock],[data-case],[data-review],[data-again],[data-docs],[data-doc],[data-resume],[data-zone],[data-pass],[data-move],[data-seqreset],[data-listen],[data-nset],[data-voice],[data-type],[data-ink],#inkbtn,#flip,#back,#gear,#find") : null;
   if(!el) return;
 
   if(el.id === "back"){ goBack(); return; }
+  if(el.id === "inkbtn"){ inkMode(!inkOn); return; }
+  if(el.hasAttribute("data-ink")){ inkAction(el.getAttribute("data-ink")); return; }
   if(el.id === "gear"){ go({ v:"settings" }); return; }
   if(el.id === "find"){ go({ v:"search" }); return; }
   if(el.id === "flip"){ cstate.flipped = !cstate.flipped; render(); return; }
@@ -1927,14 +2078,16 @@ document.addEventListener("click", function(e){
   }
   if(el.hasAttribute("data-size")){
     prog.settings.size = Math.max(0, Math.min(SIZES.length - 1, (prog.settings.size == null ? 1 : prog.settings.size) + parseInt(el.getAttribute("data-size"), 10)));
-    saveLocal(); applySettings(); if(route.v === "settings" || route.v === "readtest") render(); return;
+    saveLocal(); applySettings(); if(route.v === "settings" || route.v === "readtest") render(); if(route.v === "read") inkRefresh(); return;
   }
   if(el.hasAttribute("data-io")){
     var act = el.getAttribute("data-io"), box = document.getElementById("io"), msg = document.getElementById("iomsg");
-    if(act === "export"){ box.value = JSON.stringify({ topics:prog.topics, mocks:prog.mocks, misses:prog.misses, cases:prog.cases, seq:prog.seq, passed:prog.passed });
+    if(act === "export"){ box.value = JSON.stringify({ topics:prog.topics, mocks:prog.mocks, misses:prog.misses, cases:prog.cases, seq:prog.seq, passed:prog.passed, ink:INKS });
       msg.textContent = "Copied into the box. Select it all and paste it on the other tablet."; }
     if(act === "import"){
-      try{ mergeRemote(JSON.parse(box.value)); queuePush(); msg.textContent = "Merged. Anything newer in the box won."; render(); }
+      try{ var imp = JSON.parse(box.value); mergeRemote(imp);
+        if(imp && imp.ink && typeof imp.ink === "object"){ Object.keys(imp.ink).forEach(function(k){ if(Array.isArray(imp.ink[k]) && !(INKS[k] || []).length) INKS[k] = imp.ink[k]; }); inkSave(); }
+        queuePush(); msg.textContent = "Merged. Anything newer in the box won."; render(); }
       catch(err){ msg.textContent = "That is not valid progress data — paste the whole box, including the braces."; }
     }
     if(act === "reset"){
