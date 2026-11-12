@@ -6,14 +6,19 @@ Flow: **Live → Prep → Push**, every recording kept in a **Library**.
 ## Parts
 - `DictationService.java` — foreground service (type microphone). Draws a draggable bubble
   (tap = open/close panel, long-press = start/stop recording, drag = move) and a panel window
-  (WebView running `public/tools/dictation/panel.html`). Both windows are `FLAG_NOT_FOCUSABLE`, so
+  (native grip bar + WebView running `public/tools/dictation/panel.html`). Panel is 1/3 of the
+  screen's width and height, 2/3 when expanded; drag the grip to move it, tap it to resize
+  (prefs `panelX`, `panelY`, `panelBig`). The keyboard is always drawn above overlay windows, so
+  while it shows (bounds from DictationAccessibility) the panel and bubble move above it. Both windows are `FLAG_NOT_FOCUSABLE`, so
   the app underneath keeps focus and its keyboard. A folded panel stays attached (1×1, alpha 0,
   not touchable) so it keeps receiving phrases. Runs `SpeechRecognizer`, restarting after each
   phrase until Stop (5 alternatives requested; used by Check). Bridge `AFSPanel`; events into
   `window.KB` (onState, onPartial, onPhrase, onPanel, onPushed, onClaude).
-- `DictationAccessibility.java` — optional. On Push, finds the focused editable field in any
-  window and pastes (clipboard + ACTION_PASTE), falling back to ACTION_SET_TEXT. Adds a leading
-  space after a word and always a trailing space. Without it, Push copies to the clipboard.
+- `DictationAccessibility.java` — optional. Tracks the last editable field the user touched and
+  the keyboard's bounds. On Push, finds the focused editable field (active window, then every app
+  window incl. a tree search, then the last touched field) and pastes (clipboard + ACTION_PASTE), falling back to ACTION_SET_TEXT. Adds a leading
+  space after a word and always a trailing space. Without it, Push copies to the clipboard. When no field is found the panel shows a short
+  diagnostic (window types, packages, focused node classes).
 - `DictationStore.java` — files in `files/dictation/`: `recordings/<id>.json`, `state.json`
   (`liveId`, `prepId`), `transcript.txt` (raw backup of every phrase).
 - `ClaudeClient.java` — Messages API call (key, model in prefs `dictation`). Used for Check

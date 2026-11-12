@@ -1,9 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- AFS Dictation push-to-field. No events are needed; it only looks up the focused field on Push. -->
+<!-- AFS Dictation push-to-field. Tracks the last text field touched and where the keyboard is,
+     so Push can find the field and the floating panel can stay above the keyboard. -->
 <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
     android:description="@string/dictation_accessibility_description"
-    android:accessibilityEventTypes="typeViewFocused"
+    android:accessibilityEventTypes="typeViewFocused|typeViewClicked|typeViewTextSelectionChanged|typeViewTextChanged|typeWindowStateChanged|typeWindowsChanged"
     android:accessibilityFeedbackType="feedbackGeneric"
-    android:accessibilityFlags="flagRetrieveInteractiveWindows"
+    android:accessibilityFlags="flagRetrieveInteractiveWindows|flagReportViewIds"
     android:canRetrieveWindowContent="true"
-    android:notificationTimeout="1000" />
+    android:notificationTimeout="200" />

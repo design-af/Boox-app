@@ -10,7 +10,7 @@
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
-  let settings = { cap: true, autoPeriod: true, hasKey: false, context: '', panelHeight: 45, panelPos: 'bottom', accessibility: false };
+  let settings = { cap: true, autoPeriod: true, hasKey: false, context: '', accessibility: false };
   let st = { liveId: null, prepId: null };
   let live = null, prep = null;
   let tab = 'live', prepView = 'text';
@@ -131,17 +131,17 @@
     if (tab === 'live') {
       if (!live || !live.phrases.length) {
         c.innerHTML = (partial ? '<span class="partial" id="partial">' + esc(partial) + '</span>' : '') +
-          '<p class="empty">' + (running ? 'Listening… words appear here.' : 'Tap ● Start (or long-press the floating button). Words collect here; your keyboard stays free.') + '</p>';
+          '<p class="empty">' + (running ? 'Listening… words appear here.' : 'Tap ● Start (or long-press the bubble). Words collect here.') + '</p>';
       } else {
         c.innerHTML = '<div class="head"><b>' + esc(K.titleOf(live)) + '</b><span>' + meta(live) + '</span></div>' + textHtml(live, false, true);
       }
       if (stick || running) c.scrollTop = c.scrollHeight;
     } else if (tab === 'prep') {
       if (!prep) {
-        c.innerHTML = '<p class="empty">Nothing in Prep. In Live, tap <b>Move to prep</b>, or open a recording from the Library.</p>';
+        c.innerHTML = '<p class="empty">Nothing in Prep. In Live tap <b>Prep ▸</b>, or open one from the Library.</p>';
       } else if (prepView === 'points') {
         c.innerHTML = '<div class="head"><b>' + esc(K.titleOf(prep)) + '</b><span>Key points</span></div>' +
-          (prep.summary ? '<div class="points">' + esc(prep.summary) + '</div>' : '<p class="empty">No key points yet. Tap <b>Key points</b>.</p>');
+          (prep.summary ? '<div class="points">' + esc(prep.summary) + '</div>' : '<p class="empty">No key points yet. Tap <b>Summarise</b>.</p>');
       } else {
         const flags = prep.flags.length ? ' · ' + prep.flags.length + ' to review' : '';
         c.innerHTML = '<div class="head"><b>' + esc(K.titleOf(prep)) + '</b><span>' + meta(prep) + flags + '</span></div>' + textHtml(prep, true, false);
@@ -190,7 +190,7 @@
         '<div class="h">Heard “<b>' + esc(heard) + '</b>” <span class="sm">' + esc(f.reason || '') + (f.src === 'ai' ? ' · Claude' : ' · speech engine') + '</span></div>' +
         '<div class="r">' + f.sugg.map((s, i) => '<button data-sugg="' + i + '">' + esc(s) + '</button>').join('') +
         '<button data-act="keep">Keep</button><button data-act="del">Delete</button></div>' +
-        '<div class="r"><button data-act="prev">&lsaquo; Prev</button><button data-act="done" disabled>' + (flagIdx + 1) + ' of ' + prep.flags.length + '</button><button data-act="next">Next &rsaquo;</button><button data-act="done">Done</button></div>';
+        '<div class="r"><button data-act="prev">&lsaquo;</button><button data-act="next">' + (flagIdx + 1) + '/' + prep.flags.length + ' &rsaquo;</button><button data-act="done">Done</button></div>';
       pop.className = 'show';
     } else if (selWord) {
       const p = K.phraseById(prep, selWord.p);
@@ -211,14 +211,20 @@
     $('act-live').hidden = tab !== 'live';
     $('act-prep').hidden = tab !== 'prep';
     $('act-lib').hidden = tab !== 'library';
-    $('view').textContent = prepView === 'points' ? 'Show text' : 'Show points';
-    $('push').innerHTML = prepView === 'points' ? 'Push points &#9656;' : 'Push &#9656;';
+    $('view').textContent = prepView === 'points' ? 'Text' : 'Points';
+    $('push').innerHTML = prepView === 'points' ? 'Push pts &#9656;' : 'Push &#9656;';
     $('start').innerHTML = running ? '&#9632; Stop' : '&#9679; Start';
     $('start').className = running ? 'dark' : '';
     $('para').className = pending.br ? 'on' : '';
   }
 
-  function renderAll() { renderChrome(); renderContent(); renderPop(); }
+  function renderAll() {
+    renderChrome();
+    renderPop();
+    // While reviewing a word, its controls replace the Prep buttons to leave room for the text.
+    if ($('pop').className === 'show') $('act-prep').hidden = true;
+    renderContent();
+  }
 
   // ---------------------------------------------------------------- native events
 
@@ -246,7 +252,7 @@
       if (tab === 'live') renderContent();
     },
     onPanel(open) { if (open) reloadAll(); },
-    onPushed(result) {
+    onPushed(result, diag) {
       setBusy(false);
       if (result === 'pasted' || result === 'set') {
         prep.pushed = Date.now();
@@ -256,7 +262,7 @@
       } else if (result.indexOf('noservice') === 0) {
         msg('Copied — long-press the field and Paste. (Turn on AFS Dictation in Accessibility to push directly.)', true);
       } else {
-        msg('No text field is focused — copied instead. Tap into your notes, then Push again or Paste.', true);
+        msg('Couldn’t find the text field — copied instead, so long-press it and Paste.' + (diag ? ' Details: ' + diag : ''), true);
       }
     },
     onClaude(id, ok, text) {
@@ -349,7 +355,7 @@
       prepView = 'points';
       flagIdx = -1;
       setBusy(false);
-      msg('Key points ready — Push points to insert them');
+      msg('Key points ready — Push inserts them');
     } catch (e) {
       setBusy(false);
       msg('Key points failed: ' + e.message, true);
@@ -443,7 +449,7 @@
   $('view').onclick = () => { prepView = prepView === 'points' ? 'text' : 'points'; flagIdx = -1; selWord = null; renderAll(); };
   $('edit').onclick = () => { if (prep) N.openApp('tools/dictation/index.html#rec=' + prep.id); };
   $('push').onclick = push;
-  $('undo').onclick = doUndo;
+  document.querySelectorAll('.undo').forEach((b) => { b.onclick = doUndo; });
   $('lib-refresh').onclick = () => renderContent();
   $('lib-app').onclick = () => N.openApp('tools/dictation/index.html#library');
   let quitArmed = 0;
@@ -453,17 +459,6 @@
     quitArmed = Date.now();
     msg('Tap Close button again to remove the floating button');
   };
-  const sizes = [35, 45, 60, 75];
-  $('size').onclick = () => {
-    const i = sizes.findIndex((s) => s >= settings.panelHeight);
-    settings.panelHeight = sizes[(i + 1) % sizes.length];
-    N.setPanel(settings.panelHeight, settings.panelPos);
-  };
-  $('pos').onclick = () => {
-    settings.panelPos = settings.panelPos === 'top' ? 'bottom' : 'top';
-    N.setPanel(settings.panelHeight, settings.panelPos);
-  };
-
   $('content').addEventListener('click', (e) => {
     const li = e.target.closest('li[data-id]');
     if (li) { openFromLibrary(li.dataset.id); return; }
@@ -514,7 +509,7 @@
       loadState() { return ls.getItem('state') || '{}'; },
       saveState(j) { ls.setItem('state', j); return true; },
       settings() { return JSON.stringify({ hasKey: false }); },
-      setPanel() { }, claude(id) { setTimeout(() => KB.onClaude(id, false, 'no key in preview'), 100); },
+      claude(id) { setTimeout(() => KB.onClaude(id, false, 'no key in preview'), 100); },
     };
     return self;
   }

@@ -4,5 +4,5 @@
     <string name="title_activity_main">AFS Custom Boox</string>
     <string name="package_name">af.design.boox</string>
     <string name="custom_url_scheme">af.design.boox</string>
-    <string name="dictation_accessibility_description">Lets the AFS Dictation floating button push your transcribed text into the text field you are typing in. It only acts when you tap Push, and does not read or store anything else.</string>
+    <string name="dictation_accessibility_description">Lets the AFS Dictation floating button push your transcribed text into the text field you are typing in. It notes which text field you last used and where the keyboard is, acts only when you tap Push, and stores nothing.</string>
 </resources>

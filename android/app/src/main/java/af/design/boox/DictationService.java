@@ -39,7 +39,7 @@ import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
-import android.widget.FrameLayout;
+import android.widget.LinearLayout;
 import android.widget.TextView;
 
 import androidx.core.app.NotificationCompat;
@@ -81,10 +81,11 @@ public class DictationService extends Service {
 
     private TextView bubble;
     private WindowManager.LayoutParams bubbleLp;
-    private FrameLayout panel;
+    private LinearLayout panel;
     private WindowManager.LayoutParams panelLp;
     private WebView web;
     private boolean panelOpen;
+    private int imeTop = -1;          // top of the on-screen keyboard, from DictationAccessibility
     private boolean jsReady;
     private final ArrayList<String> queued = new ArrayList<>();
 
@@ -234,14 +235,62 @@ public class DictationService extends Service {
         buildBubble();
     }
 
-    @SuppressLint({"SetJavaScriptEnabled", "AddJavascriptInterface"})
+    @SuppressLint({"SetJavaScriptEnabled", "AddJavascriptInterface", "ClickableViewAccessibility"})
     private void buildPanel() {
-        panel = new FrameLayout(this);
+        panel = new LinearLayout(this);
+        panel.setOrientation(LinearLayout.VERTICAL);
         GradientDrawable bg = new GradientDrawable();
         bg.setColor(Color.WHITE);
         bg.setStroke(dp(3), Color.BLACK);
         panel.setBackground(bg);
-        panel.setPadding(dp(3), dp(3), dp(3), dp(3));
+        panel.setPadding(dp(3), 0, dp(3), dp(3));
+
+        // Grip: drag to move the panel, tap to switch between small (1/3) and large (2/3).
+        TextView grip = new TextView(this);
+        grip.setText("\u2261  drag to move  \u00B7  tap to resize  \u2261");
+        grip.setGravity(Gravity.CENTER);
+        grip.setTextColor(Color.WHITE);
+        grip.setBackgroundColor(Color.BLACK);
+        grip.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        grip.setTypeface(Typeface.DEFAULT_BOLD);
+        grip.setSingleLine(true);
+        panel.addView(grip, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(34)));
+        final float slop = dp(8);
+        grip.setOnTouchListener(new View.OnTouchListener() {
+            float downX, downY;
+            int startX, startY;
+            boolean dragging;
+
+            @Override
+            public boolean onTouch(View v, MotionEvent e) {
+                switch (e.getActionMasked()) {
+                    case MotionEvent.ACTION_DOWN:
+                        downX = e.getRawX(); downY = e.getRawY();
+                        startX = panelLp.x; startY = panelLp.y;
+                        dragging = false;
+                        return true;
+                    case MotionEvent.ACTION_MOVE:
+                        float dx = e.getRawX() - downX, dy = e.getRawY() - downY;
+                        if (!dragging && Math.hypot(dx, dy) > slop) dragging = true;
+                        if (dragging) {
+                            DisplayMetrics m = screen();
+                            panelLp.x = clamp(startX + Math.round(dx), 0, m.widthPixels - panelLp.width);
+                            panelLp.y = clamp(startY + Math.round(dy), 0, m.heightPixels - panelLp.height);
+                            try { wm.updateViewLayout(panel, panelLp); } catch (Exception ignored) { }
+                        }
+                        return true;
+                    case MotionEvent.ACTION_UP:
+                        if (dragging) {
+                            prefs().edit().putInt("panelX", panelLp.x).putInt("panelY", panelLp.y).apply();
+                        } else {
+                            prefs().edit().putBoolean("panelBig", !prefs().getBoolean("panelBig", false)).apply();
+                            layoutPanel();
+                        }
+                        return true;
+                }
+                return false;
+            }
+        });
 
         web = new WebView(this);
         WebSettings ws = web.getSettings();
@@ -258,28 +307,54 @@ public class DictationService extends Service {
                 return true; // the panel never navigates
             }
         });
-        panel.addView(web, new FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+        panel.addView(web, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
 
         panelLp = new WindowManager.LayoutParams(1, 1, overlayType(),
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
                         | WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE,
                 PixelFormat.TRANSLUCENT);
         panelLp.alpha = 0f;
-        panelLp.gravity = Gravity.TOP | Gravity.CENTER_HORIZONTAL;
+        panelLp.gravity = Gravity.TOP | Gravity.START;
         wm.addView(panel, panelLp);
         web.loadUrl("file:///android_asset/public/tools/dictation/panel.html");
+    }
+
+    private static int clamp(int v, int lo, int hi) {
+        return Math.max(lo, Math.min(v, Math.max(lo, hi)));
+    }
+
+    /** Called by DictationAccessibility when the on-screen keyboard appears, moves or hides. */
+    void onImeBounds(int top) {
+        main.post(() -> {
+            imeTop = top;
+            layoutPanel();
+            placeBubble();
+        });
     }
 
     private void layoutPanel() {
         if (panel == null) return;
         if (panelOpen) {
             DisplayMetrics m = screen();
-            int pct = Math.max(25, Math.min(80, prefs().getInt("panelHeight", 45)));
-            boolean top = "top".equals(prefs().getString("panelPos", "bottom"));
-            panelLp.width = Math.min(m.widthPixels - dp(24), dp(900));
-            panelLp.height = m.heightPixels * pct / 100;
-            panelLp.gravity = (top ? Gravity.TOP : Gravity.BOTTOM) | Gravity.CENTER_HORIZONTAL;
-            panelLp.y = dp(top ? 40 : 24);
+            boolean big = prefs().getBoolean("panelBig", false);
+            int w = m.widthPixels * (big ? 2 : 1) / 3;
+            int h = m.heightPixels * (big ? 2 : 1) / 3;
+            w = Math.min(m.widthPixels, Math.max(w, dp(300)));
+            h = Math.min(m.heightPixels, Math.max(h, dp(300)));
+            int x = prefs().getInt("panelX", m.widthPixels - w - dp(16));
+            int y = prefs().getInt("panelY", dp(72));
+            x = clamp(x, 0, m.widthPixels - w);
+            y = clamp(y, 0, m.heightPixels - h);
+            // The keyboard is always drawn above floating windows, so keep clear of it.
+            if (imeTop > 0 && y + h > imeTop - dp(6)) {
+                int room = imeTop - dp(12);
+                if (h > room) h = Math.max(dp(220), room);
+                y = clamp(imeTop - h - dp(6), 0, m.heightPixels - h);
+            }
+            panelLp.width = w;
+            panelLp.height = h;
+            panelLp.x = x;
+            panelLp.y = y;
             panelLp.alpha = 1f;
             panelLp.flags &= ~WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE;
         } else {
@@ -315,6 +390,9 @@ public class DictationService extends Service {
         bubbleLp.y = prefs().getInt("bubbleY", m.heightPixels * 2 / 5);
         bubbleLp.x = Math.max(0, Math.min(bubbleLp.x, m.widthPixels - size));
         bubbleLp.y = Math.max(0, Math.min(bubbleLp.y, m.heightPixels - size));
+        DictationAccessibility a = DictationAccessibility.instance;
+        if (a != null) imeTop = a.imeTop();
+        avoidIme();
         styleBubble();
 
         final float slop = dp(10);
@@ -361,6 +439,22 @@ public class DictationService extends Service {
             }
         });
         wm.addView(bubble, bubbleLp);
+    }
+
+    /** Saved bubble position, nudged above the keyboard while it is showing. */
+    private void avoidIme() {
+        if (bubbleLp == null) return;
+        DisplayMetrics m = screen();
+        int size = bubbleLp.height;
+        int y = clamp(prefs().getInt("bubbleY", m.heightPixels * 2 / 5), 0, m.heightPixels - size);
+        if (imeTop > 0 && y + size > imeTop - dp(6)) y = Math.max(0, imeTop - size - dp(10));
+        bubbleLp.y = y;
+    }
+
+    private void placeBubble() {
+        if (bubble == null) return;
+        avoidIme();
+        try { if (bubble.isAttachedToWindow()) wm.updateViewLayout(bubble, bubbleLp); } catch (Exception ignored) { }
     }
 
     private void styleBubble() {
@@ -427,9 +521,11 @@ public class DictationService extends Service {
         @JavascriptInterface public void push(String text) {
             main.post(() -> {
                 String result;
+                String diag = "";
                 DictationAccessibility a = DictationAccessibility.instance;
                 if (a != null) {
-                    try { result = a.insert(text); } catch (Exception e) { result = "nofield"; }
+                    try { result = a.insert(text); } catch (Exception e) { result = "nofield"; a.lastDiag = String.valueOf(e.getMessage()); }
+                    diag = a.lastDiag == null ? "" : a.lastDiag;
                 } else result = "noservice";
                 if (!"pasted".equals(result) && !"set".equals(result)) {
                     android.content.ClipboardManager cm = (android.content.ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
@@ -437,7 +533,7 @@ public class DictationService extends Service {
                         try { cm.setPrimaryClip(android.content.ClipData.newPlainText("AFS Dictation", text)); result = result + "+copied"; } catch (Exception ignored) { }
                     }
                 }
-                js("KB.onPushed(" + JSONObject.quote(result) + ")");
+                js("KB.onPushed(" + JSONObject.quote(result) + "," + JSONObject.quote(diag) + ")");
             });
         }
 
@@ -455,17 +551,9 @@ public class DictationService extends Service {
                 o.put("autoPeriod", p.getBoolean("autoPeriod", true));
                 o.put("hasKey", ClaudeClient.hasKey(DictationService.this));
                 o.put("context", p.getString("context", ""));
-                o.put("panelHeight", p.getInt("panelHeight", 45));
-                o.put("panelPos", p.getString("panelPos", "bottom"));
                 o.put("accessibility", DictationAccessibility.isOn());
             } catch (Exception ignored) { }
             return o.toString();
-        }
-
-        @JavascriptInterface public void setPanel(int heightPct, String pos) {
-            prefs().edit().putInt("panelHeight", Math.max(25, Math.min(80, heightPct)))
-                    .putString("panelPos", "top".equals(pos) ? "top" : "bottom").apply();
-            main.post(DictationService.this::layoutPanel);
         }
 
         @JavascriptInterface public void claude(String id, String body) {
