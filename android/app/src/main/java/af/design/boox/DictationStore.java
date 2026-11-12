@@ -69,7 +69,6 @@ final class DictationStore {
         File tmp = new File(f.getParentFile(), f.getName() + ".tmp");
         try (FileOutputStream out = new FileOutputStream(tmp, false)) {
             out.write(s.getBytes(StandardCharsets.UTF_8));
-            out.getFD().sync();
         } catch (Exception e) {
             return false;
         }

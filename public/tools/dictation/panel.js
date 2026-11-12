@@ -14,7 +14,7 @@
   let st = { liveId: null, prepId: null };
   let live = null, prep = null;
   let tab = 'live', prepView = 'text';
-  let partial = '', running = false;
+  let partial = '', running = false, panelOpen = true, partialTimer = 0, lastPartialDraw = 0;
   let pending = { end: null, br: false };
   let flagIdx = -1, selWord = null, busy = false;
   const undo = [];
@@ -31,9 +31,19 @@
   }
   function save(rec) {
     if (!rec) return;
+    if (rec === live) { clearTimeout(liveSaveTimer); liveDirty = false; }
     rec.updated = Date.now();
     N.save(rec.id, JSON.stringify(rec));
   }
+  // While recording, Live is saved every few seconds instead of after every phrase, so the
+  // tablet isn't rewriting a growing file constantly. (Every phrase is also in the raw backup.)
+  let liveSaveTimer = 0, liveDirty = false;
+  function saveLiveSoon() {
+    liveDirty = true;
+    clearTimeout(liveSaveTimer);
+    liveSaveTimer = setTimeout(flushLive, 15000);
+  }
+  function flushLive() { if (liveDirty && live) save(live); }
   function saveState() { N.saveState(JSON.stringify(st)); }
   function snapshot(kind) {
     if (kind === 'state') undo.push({ kind, json: JSON.stringify(st) });
@@ -88,7 +98,7 @@
 
   // ---------------------------------------------------------------- rendering
 
-  function textHtml(rec, interactive, withPartial) {
+  function textHtml(rec, interactive, withPartial, tail) {
     const out = [];
     const flagged = new Map();
     if (interactive) {
@@ -96,7 +106,13 @@
         for (let i = f.ws; i < f.we; i++) flagged.set(f.p + ':' + i, idx);
       });
     }
-    for (const r of K.render(rec, opts())) {
+    let rows = K.render(rec, opts());
+    if (tail && rows.length > tail) {
+      out.push('<span class="sm">\u2026 earlier text is saved; it all goes to Prep.</span><br>');
+      rows = rows.slice(-tail);
+      rows[0] = Object.assign({}, rows[0], { sep: '' });
+    }
+    for (const r of rows) {
       if (r.sep === '\n') out.push('<br>');
       else if (r.sep) out.push(' ');
       if (r.p.fixed) {
@@ -126,6 +142,7 @@
   function nearBottom(el) { return el.scrollHeight - el.scrollTop - el.clientHeight < 60; }
 
   function renderContent() {
+    if (!panelOpen) return; // folded: nothing to draw (saves e-ink refreshes)
     const c = $('content');
     const stick = nearBottom(c);
     if (tab === 'live') {
@@ -133,7 +150,7 @@
         c.innerHTML = (partial ? '<span class="partial" id="partial">' + esc(partial) + '</span>' : '') +
           '<p class="empty">' + (running ? 'Listening… words appear here.' : 'Tap ● Start (or long-press the bubble). Words collect here.') + '</p>';
       } else {
-        c.innerHTML = '<div class="head"><b>' + esc(K.titleOf(live)) + '</b><span>' + meta(live) + '</span></div>' + textHtml(live, false, true);
+        c.innerHTML = '<div class="head"><b>' + esc(K.titleOf(live)) + '</b><span>' + meta(live) + '</span></div>' + textHtml(live, false, true, 40);
       }
       if (stick || running) c.scrollTop = c.scrollHeight;
     } else if (tab === 'prep') {
@@ -169,8 +186,16 @@
     }).join('') + '</ul>';
   }
 
+  // Partial words are redrawn at most about once a second: every redraw is an e-ink refresh.
+  function schedulePartial() {
+    if (!panelOpen || tab !== 'live') return;
+    const wait = Math.max(0, 900 - (Date.now() - lastPartialDraw));
+    if (partialTimer) return;
+    partialTimer = setTimeout(() => { partialTimer = 0; lastPartialDraw = Date.now(); renderPartial(); }, wait);
+  }
+
   function renderPartial() {
-    if (tab !== 'live') return;
+    if (!panelOpen || tab !== 'live') return;
     const p = $('partial');
     if (!p) { renderContent(); return; }
     const c = $('content');
@@ -231,11 +256,12 @@
   window.KB = {
     onState(isRunning, text) {
       running = !!isRunning;
+      if (!running) flushLive();
       $('status').textContent = running ? '● ' + (text || 'Listening') : 'Stopped';
       if (!running && text && text !== 'Stopped') msg(text);
       renderChrome();
     },
-    onPartial(t) { partial = t || ''; renderPartial(); },
+    onPartial(t) { partial = t || ''; schedulePartial(); },
     onPhrase(json) {
       let h;
       try { h = JSON.parse(json); } catch (e) { return; }
@@ -247,11 +273,16 @@
       K.addPhrase(live, h, pending);
       pending = { end: null, br: false };
       partial = '';
-      save(live);
+      if (live.phrases.length === 1) save(live); else saveLiveSoon();
+      if (!panelOpen) return;
       renderChrome();
       if (tab === 'live') renderContent();
     },
-    onPanel(open) { if (open) reloadAll(); },
+    onPanel(open) {
+      panelOpen = !!open;
+      if (open) { flushLive(); reloadAll(); }
+      else flushLive();
+    },
     onPushed(result, diag) {
       setBusy(false);
       if (result === 'pasted' || result === 'set') {
@@ -291,6 +322,7 @@
 
   function moveToPrep() {
     if (!live || !live.phrases.length) { msg('Nothing in Live yet'); return; }
+    save(live);
     snapshot('state');
     prep = live;
     st.prepId = live.id;
@@ -455,7 +487,7 @@
   let quitArmed = 0;
   $('quit').onclick = () => {
     if (running) { msg('Stop recording first'); return; }
-    if (Date.now() - quitArmed < 4000) { N.quit(); return; }
+    if (Date.now() - quitArmed < 4000) { flushLive(); N.quit(); return; }
     quitArmed = Date.now();
     msg('Tap Close button again to remove the floating button');
   };

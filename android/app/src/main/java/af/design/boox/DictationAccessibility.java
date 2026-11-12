@@ -7,6 +7,8 @@ import android.content.Context;
 import android.graphics.Rect;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
 import android.view.accessibility.AccessibilityWindowInfo;
@@ -27,6 +29,8 @@ public class DictationAccessibility extends AccessibilityService {
     private AccessibilityNodeInfo lastField;
     private String lastFieldPkg = "";
     private final Rect imeBounds = new Rect();
+    private final Handler handler = new Handler(Looper.getMainLooper());
+    private final Runnable imeCheck = this::updateIme;
 
     /** Why the last push found nothing; shown in the panel. */
     String lastDiag = "";
@@ -48,6 +52,7 @@ public class DictationAccessibility extends AccessibilityService {
 
     @Override
     public void onDestroy() {
+        handler.removeCallbacksAndMessages(null);
         instance = null;
         super.onDestroy();
     }
@@ -71,10 +76,14 @@ public class DictationAccessibility extends AccessibilityService {
     public void onAccessibilityEvent(AccessibilityEvent event) {
         if (event == null) return;
         int type = event.getEventType();
-        if (type == AccessibilityEvent.TYPE_WINDOWS_CHANGED || type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
-            updateIme();
+        if (type == AccessibilityEvent.TYPE_WINDOWS_CHANGED) {
+            // Coalesce bursts of window changes into one cheap check.
+            handler.removeCallbacks(imeCheck);
+            handler.postDelayed(imeCheck, 250);
             return;
         }
+        // Only focus changes are tracked (not keystrokes), so typing is never slowed down.
+        if (type != AccessibilityEvent.TYPE_VIEW_FOCUSED) return;
         if (isOurs(event.getPackageName())) return;
         try {
             AccessibilityNodeInfo src = event.getSource();

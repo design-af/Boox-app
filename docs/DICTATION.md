@@ -37,3 +37,7 @@ Flow: **Live → Prep → Push**, every recording kept in a **Library**.
 - Move to prep never stops recording: the next phrase starts a new Live recording.
 - Editing the transcript in the app turns it into one "fixed" block shown exactly as typed.
 - Build 18 had an input-method keyboard version; build 19 replaced it with the floating button.
+- Build 21 (Boox keyboard lag after recording a while): partials only sent/drawn while the panel
+  is open and at most ~1/s (each redraw is an e-ink refresh); folded panel draws nothing; Live
+  shows only the last 40 phrases; Live saved every 15 s (and on stop/fold/move/actions) instead
+  of per phrase, no fsync; accessibility listens only to focus + window changes, never keystrokes.

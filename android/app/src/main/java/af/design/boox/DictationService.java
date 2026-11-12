@@ -86,6 +86,7 @@ public class DictationService extends Service {
     private WebView web;
     private boolean panelOpen;
     private int imeTop = -1;          // top of the on-screen keyboard, from DictationAccessibility
+    private long lastPartialAt;       // partials are throttled: each one redraws the e-ink screen
     private boolean jsReady;
     private final ArrayList<String> queued = new ArrayList<>();
 
@@ -326,8 +327,9 @@ public class DictationService extends Service {
     /** Called by DictationAccessibility when the on-screen keyboard appears, moves or hides. */
     void onImeBounds(int top) {
         main.post(() -> {
+            if (top == imeTop) return;
             imeTop = top;
-            layoutPanel();
+            if (panelOpen) layoutPanel();
             placeBubble();
         });
     }
@@ -706,7 +708,10 @@ public class DictationService extends Service {
         @Override public void onEvent(int eventType, Bundle params) { }
 
         @Override public void onPartialResults(Bundle b) {
-            if (!running || b == null) return;
+            if (!running || b == null || !panelOpen) return;
+            long now = SystemClock.elapsedRealtime();
+            if (now - lastPartialAt < 700) return;
+            lastPartialAt = now;
             ArrayList<String> r = b.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
             if (r != null && !r.isEmpty() && r.get(0) != null) js("KB.onPartial(" + JSONObject.quote(r.get(0)) + ")");
         }
