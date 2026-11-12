@@ -42,18 +42,24 @@
             android:exported="false"
             android:foregroundServiceType="mediaPlayback" />
 
-        <!-- AFS Dictation: a keyboard that types continuous speech into any app's text field. -->
+        <!-- AFS Dictation: floating button + panel over other apps (records with the microphone). -->
         <service
-            android:name=".DictationIME"
+            android:name=".DictationService"
+            android:exported="false"
+            android:foregroundServiceType="microphone" />
+
+        <!-- AFS Dictation: pushes text into the focused field when the user taps Push. -->
+        <service
+            android:name=".DictationAccessibility"
             android:label="AFS Dictation"
-            android:permission="android.permission.BIND_INPUT_METHOD"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
             android:exported="true">
             <intent-filter>
-                <action android:name="android.view.InputMethod" />
+                <action android:name="android.accessibilityservice.AccessibilityService" />
             </intent-filter>
             <meta-data
-                android:name="android.view.im"
-                android:resource="@xml/dictation_method" />
+                android:name="android.accessibilityservice"
+                android:resource="@xml/dictation_accessibility" />
         </service>
     </application>
 
@@ -76,6 +82,8 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
     <!-- Template Maker saves to Documents/AFS Templates via MediaStore; the permission is only for Android 9 and older. -->
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" />

@@ -1,24 +1,34 @@
-# Dictation (AFS Dictation keyboard)
+# Dictation (AFS Dictation floating button)
 
-Live, continuous speech-to-text that types into **any text field in any app** — built for transcribing a presenter into notes.
+Live transcription of talks over any app, with the user's own keyboard still in use.
+Flow: **Live → Prep → Push**, every recording kept in a **Library**.
 
-## How it works
-- `DictationIME.java` is an Android input method (keyboard) named **AFS Dictation**. It runs Android's `SpeechRecognizer` and restarts it immediately after every phrase until the user taps Stop, so it never times out on pauses.
-- Words in progress are shown as composing (underlined) text in the field and committed when the phrase ends. "Show words as they're heard" off = phrase-by-phrase commit only.
-- Spacing and sentence capitals come from the text before the cursor. On Android 13+ it asks the engine for punctuation/formatting.
-- Punctuation / New line tapped mid-phrase is queued and added after the phrase.
-- Every committed phrase is appended to `files/dictation/transcript.txt` with a dated header per session (backup if a notes app loses text). The tool page shows, copies, shares and clears it.
-- Engine: Auto (on-device if `isOnDeviceRecognitionAvailable`, Android 12+, else online), On-device, Online. On-device language errors fall back to online.
-- "Silence start beeps" mutes music/notification/system streams while listening and restores them on Stop.
-- The screen is kept on while listening; hiding the keyboard stops listening.
-- Errors restart with back-off; network errors show a status and keep retrying.
+## Parts
+- `DictationService.java` — foreground service (type microphone). Draws a draggable bubble
+  (tap = open/close panel, long-press = start/stop recording, drag = move) and a panel window
+  (WebView running `public/tools/dictation/panel.html`). Both windows are `FLAG_NOT_FOCUSABLE`, so
+  the app underneath keeps focus and its keyboard. A folded panel stays attached (1×1, alpha 0,
+  not touchable) so it keeps receiving phrases. Runs `SpeechRecognizer`, restarting after each
+  phrase until Stop (5 alternatives requested; used by Check). Bridge `AFSPanel`; events into
+  `window.KB` (onState, onPartial, onPhrase, onPanel, onPushed, onClaude).
+- `DictationAccessibility.java` — optional. On Push, finds the focused editable field in any
+  window and pastes (clipboard + ACTION_PASTE), falling back to ACTION_SET_TEXT. Adds a leading
+  space after a word and always a trailing space. Without it, Push copies to the clipboard.
+- `DictationStore.java` — files in `files/dictation/`: `recordings/<id>.json`, `state.json`
+  (`liveId`, `prepId`), `transcript.txt` (raw backup of every phrase).
+- `ClaudeClient.java` — Messages API call (key, model in prefs `dictation`). Used for Check
+  (forced tool `report_misheard`) and Key points (plain text with a `Title:` line).
+- `DictationPlugin.java` — app page API: status, permissions, show/hide bubble, settings,
+  library (list/load/save/remove/state/setState), claude, copy/share.
+- `kbcore.js` — shared recording logic: formatting (period + space at each pause, sentence
+  capitals, paragraphs), flags (speech-engine alternatives diffed with an LCS; Claude flags
+  mapped by line + quote), edits, request builders. Tested by `scripts/validate-dictation.mjs`.
+- `panel.js` — Live / Prep / Library UI, undo, flag review popover, push.
+- `index.html` + `app.js` — setup, settings (API key, model, context, formatting, engine),
+  Library with detail view (edit title/text/key points, generate key points, copy, share,
+  put in Prep, delete), raw backup.
 
-## Setup (tool page `public/tools/dictation/`)
-1. Allow microphone (`DictationPlugin.requestMic`).
-2. Speech engine present (`SpeechRecognizer.isRecognitionAvailable`; manifest `<queries>` for `android.speech.RecognitionService`). On a Boox without Google apps: install the Google app or "Speech Recognition & Synthesis from Google".
-3. Enable AFS Dictation in keyboard settings.
-4. Switch to it (input method picker).
-
-## Native API
-`Capacitor.nativePromise("Dictation", …)`: `status`, `requestMic`, `openKeyboardSettings`, `openAppSettings`, `showPicker`, `setSettings {engine, live, mute, cap, lang}`, `transcript`, `copyTranscript`, `shareTranscript`, `clearTranscript`.
-Settings are SharedPreferences `dictation`, read by the IME at each Start.
+## Notes
+- Move to prep never stops recording: the next phrase starts a new Live recording.
+- Editing the transcript in the app turns it into one "fixed" block shown exactly as typed.
+- Build 18 had an input-method keyboard version; build 19 replaced it with the floating button.

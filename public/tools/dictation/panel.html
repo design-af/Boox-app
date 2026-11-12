@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AFS Dictation panel</title>
+<style>
+/* Floating panel over other apps. E-ink: black on white, no animation. */
+*{box-sizing:border-box;animation:none!important;transition:none!important}
+[hidden]{display:none!important}
+html,body{margin:0;height:100%;background:#fff;color:#000;
+  font:17px/1.4 system-ui,sans-serif;-webkit-font-smoothing:none;-webkit-tap-highlight-color:transparent;
+  -webkit-user-select:none;user-select:none}
+body{display:flex;flex-direction:column;overflow:hidden}
+button{font:inherit;font-weight:600;min-height:48px;padding:0 10px;border:2px solid #000;background:#fff;color:#000;border-radius:0;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+button:active{background:#000;color:#fff}
+button:disabled{opacity:.4}
+button.on,button.dark{background:#000;color:#fff}
+.bar{flex:none;display:flex;align-items:center;gap:8px;padding:4px 6px;border-bottom:2px solid #000;min-height:40px}
+#status{font-weight:700;white-space:nowrap}
+#msg{flex:1;min-width:0;font-size:.82rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bar button{flex:none;min-height:36px;padding:0 10px;font-size:.9rem}
+.row{flex:none;display:flex;gap:4px;padding:4px}
+.tabs{border-bottom:2px solid #000}
+.tabs button{min-height:44px}
+#content{flex:1;min-height:0;overflow-y:auto;padding:8px 10px 14px;font-size:1.02rem;line-height:1.55;-webkit-user-select:text;user-select:text}
+.head{font-size:.8rem;margin:0 0 6px;border-bottom:1px solid #000;padding-bottom:4px;display:flex;gap:8px;align-items:baseline}
+.head b{font-size:.95rem;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.empty{color:#444;font-size:.92rem}
+.w.f{text-decoration:underline;text-decoration-thickness:3px;text-underline-offset:3px;font-weight:600}
+.w.cur{background:#000;color:#fff;text-decoration:none}
+.w.sel{outline:2px solid #000}
+.partial{color:#555;font-style:italic}
+.points{white-space:pre-wrap}
+.lib{list-style:none;margin:0;padding:0}
+.lib li{border:2px solid #000;margin:0 0 6px;padding:8px 10px}
+.lib li:active{background:#000;color:#fff}
+.lib .t{font-weight:700;display:block}
+.lib .m{font-size:.8rem}
+#pop{flex:none;border-top:3px solid #000;padding:6px;display:none}
+#pop.show{display:block}
+#pop .h{font-size:.9rem;margin:0 0 6px}
+#pop .r{display:flex;gap:4px;flex-wrap:wrap;margin-top:4px}
+#pop .r button{flex:1 1 auto}
+.sm{font-size:.78rem;color:#333}
+</style>
+</head>
+<body>
+  <div class="bar">
+    <span id="status">Stopped</span>
+    <span id="msg"></span>
+    <button id="pos" title="Move panel to top or bottom">&#8645;</button>
+    <button id="size" title="Panel size">&#8597;</button>
+    <button id="min" title="Fold into the floating button">&ndash;</button>
+  </div>
+  <div class="row tabs">
+    <button id="t-live">Live</button>
+    <button id="t-prep">Prep</button>
+    <button id="t-lib">Library</button>
+  </div>
+  <div id="content"></div>
+  <div id="pop"></div>
+  <div class="row" id="act-live">
+    <button id="move" class="dark">Move to prep &#9656;</button>
+    <button data-punct=".">.</button>
+    <button data-punct=",">,</button>
+    <button data-punct="?">?</button>
+    <button id="para" title="Next phrase starts a new paragraph">&para;</button>
+    <button id="bksp" title="Delete last word">&#9003;</button>
+  </div>
+  <div class="row" id="act-prep" hidden>
+    <button id="check">Check</button>
+    <button id="points">Key points</button>
+    <button id="view">Show points</button>
+    <button id="edit">Edit</button>
+    <button id="push" class="dark">Push &#9656;</button>
+  </div>
+  <div class="row" id="act-lib" hidden>
+    <button id="lib-refresh">Refresh</button>
+    <button id="lib-app">Open in app</button>
+    <button id="quit">Close button</button>
+  </div>
+  <div class="row">
+    <button id="start" style="flex:2.4">&#9679; Start</button>
+    <button id="undo">Undo</button>
+  </div>
+<script src="kbcore.js"></script>
+<script src="panel.js"></script>
+</body>
+</html>

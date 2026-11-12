@@ -7,11 +7,10 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
+import android.net.Uri;
 import android.os.Build;
 import android.provider.Settings;
 import android.speech.SpeechRecognizer;
-import android.view.inputmethod.InputMethodInfo;
-import android.view.inputmethod.InputMethodManager;
 
 import androidx.core.content.ContextCompat;
 
@@ -24,23 +23,15 @@ import com.getcapacitor.annotation.Permission;
 import com.getcapacitor.annotation.PermissionCallback;
 
 import java.io.File;
-import java.io.FileInputStream;
-import java.io.FileOutputStream;
-import java.nio.charset.StandardCharsets;
 
 /**
- * Setup and backup transcript for the AFS Dictation keyboard (DictationIME).
+ * App-side controls for AFS Dictation (floating button, settings, recordings library).
  *
- * JS:
- *   Capacitor.nativePromise("Dictation", "status")          // mic, enabled, selected, engine availability, settings
- *   Capacitor.nativePromise("Dictation", "requestMic")
- *   Capacitor.nativePromise("Dictation", "openKeyboardSettings")
- *   Capacitor.nativePromise("Dictation", "showPicker")
- *   Capacitor.nativePromise("Dictation", "setSettings", { engine, live, mute, cap, lang })
- *   Capacitor.nativePromise("Dictation", "transcript")      // { text }
- *   Capacitor.nativePromise("Dictation", "copyTranscript")
- *   Capacitor.nativePromise("Dictation", "shareTranscript")
- *   Capacitor.nativePromise("Dictation", "clearTranscript")
+ * JS: Capacitor.nativePromise("Dictation", method, args)
+ *   status | requestMic | openOverlaySettings | openAccessibilitySettings | openAppSettings
+ *   showBubble | hideBubble | setSettings {engine, mute, cap, autoPeriod, lang, model, context, apiKey}
+ *   list | load {id} | save {id, json} | remove {id} | state | setState {json} | claude {body}
+ *   transcript | copyText {text} | shareText {text, subject} | clearTranscript
  */
 @CapacitorPlugin(
     name = "Dictation",
@@ -49,37 +40,37 @@ import java.nio.charset.StandardCharsets;
 public class DictationPlugin extends Plugin {
 
     private SharedPreferences prefs() {
-        return getContext().getSharedPreferences(DictationIME.PREFS, Context.MODE_PRIVATE);
+        return getContext().getSharedPreferences(DictationStore.PREFS, Context.MODE_PRIVATE);
     }
 
     private boolean hasMic() {
         return ContextCompat.checkSelfPermission(getContext(), Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED;
     }
 
+    private boolean canOverlay() {
+        return Build.VERSION.SDK_INT < 23 || Settings.canDrawOverlays(getContext());
+    }
+
+    private boolean accessibilityEnabled() {
+        if (DictationAccessibility.isOn()) return true;
+        try {
+            String s = Settings.Secure.getString(getContext().getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
+            return s != null && s.contains(getContext().getPackageName() + "/");
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
     private JSObject buildStatus() {
         Context c = getContext();
         JSObject r = new JSObject();
         r.put("mic", hasMic());
-
-        boolean enabled = false;
-        InputMethodManager imm = (InputMethodManager) c.getSystemService(Context.INPUT_METHOD_SERVICE);
-        if (imm != null) {
-            try {
-                for (InputMethodInfo info : imm.getEnabledInputMethodList()) {
-                    if (c.getPackageName().equals(info.getPackageName())) { enabled = true; break; }
-                }
-            } catch (Exception ignored) { }
-        }
-        r.put("enabled", enabled);
-
-        String current = null;
-        try { current = Settings.Secure.getString(c.getContentResolver(), Settings.Secure.DEFAULT_INPUT_METHOD); } catch (Exception ignored) { }
-        r.put("selected", current != null && current.startsWith(c.getPackageName() + "/"));
-
+        r.put("overlay", canOverlay());
+        r.put("accessibility", accessibilityEnabled());
+        r.put("bubble", DictationService.isRunning());
         boolean recognizer = false;
         try { recognizer = SpeechRecognizer.isRecognitionAvailable(c); } catch (Exception ignored) { }
         r.put("recognizer", recognizer);
-
         boolean onDevice = false;
         if (Build.VERSION.SDK_INT >= 31) {
             try { onDevice = SpeechRecognizer.isOnDeviceRecognitionAvailable(c); } catch (Exception ignored) { }
@@ -90,21 +81,22 @@ public class DictationPlugin extends Plugin {
         SharedPreferences p = prefs();
         JSObject s = new JSObject();
         s.put("engine", p.getString("engine", "auto"));
-        s.put("live", p.getBoolean("live", true));
         s.put("mute", p.getBoolean("mute", true));
         s.put("cap", p.getBoolean("cap", true));
+        s.put("autoPeriod", p.getBoolean("autoPeriod", true));
         s.put("lang", p.getString("lang", ""));
+        s.put("model", p.getString("model", ClaudeClient.DEFAULT_MODEL));
+        s.put("context", p.getString("context", ""));
+        s.put("hasKey", ClaudeClient.hasKey(c));
         r.put("settings", s);
 
-        File f = DictationIME.transcriptFile(c);
+        File f = DictationStore.transcriptFile(c);
         r.put("transcriptBytes", f.exists() ? f.length() : 0);
         return r;
     }
 
     @PluginMethod
-    public void status(PluginCall call) {
-        call.resolve(buildStatus());
-    }
+    public void status(PluginCall call) { call.resolve(buildStatus()); }
 
     @PluginMethod
     public void requestMic(PluginCall call) {
@@ -113,106 +105,156 @@ public class DictationPlugin extends Plugin {
     }
 
     @PermissionCallback
-    private void micResult(PluginCall call) {
-        call.resolve(buildStatus());
-    }
+    private void micResult(PluginCall call) { call.resolve(buildStatus()); }
 
-    @PluginMethod
-    public void openKeyboardSettings(PluginCall call) {
+    private void launch(PluginCall call, Intent i) {
         try {
-            Intent i = new Intent(Settings.ACTION_INPUT_METHOD_SETTINGS);
             i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             getContext().startActivity(i);
             call.resolve();
         } catch (Exception e) {
-            call.reject("Could not open keyboard settings: " + e.getMessage());
+            call.reject("Could not open settings: " + e.getMessage());
         }
+    }
+
+    @PluginMethod
+    public void openOverlaySettings(PluginCall call) {
+        if (Build.VERSION.SDK_INT >= 23) {
+            launch(call, new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + getContext().getPackageName())));
+        } else call.resolve();
+    }
+
+    @PluginMethod
+    public void openAccessibilitySettings(PluginCall call) {
+        launch(call, new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS));
     }
 
     @PluginMethod
     public void openAppSettings(PluginCall call) {
+        launch(call, new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + getContext().getPackageName())));
+    }
+
+    @PluginMethod
+    public void showBubble(PluginCall call) {
+        if (!hasMic()) { call.reject("Allow the microphone first"); return; }
+        if (!canOverlay()) { call.reject("Allow “Display over other apps” first"); return; }
         try {
-            Intent i = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
-            i.setData(android.net.Uri.parse("package:" + getContext().getPackageName()));
-            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            getContext().startActivity(i);
-            call.resolve();
+            DictationService.show(getContext());
+            call.resolve(buildStatus());
         } catch (Exception e) {
-            call.reject("Could not open app settings: " + e.getMessage());
+            call.reject("Could not start the floating button: " + e.getMessage());
         }
     }
 
     @PluginMethod
-    public void showPicker(PluginCall call) {
-        InputMethodManager imm = (InputMethodManager) getContext().getSystemService(Context.INPUT_METHOD_SERVICE);
-        if (imm == null) { call.reject("No input method service"); return; }
-        getActivity().runOnUiThread(() -> {
-            imm.showInputMethodPicker();
-            call.resolve();
-        });
+    public void hideBubble(PluginCall call) {
+        DictationService.close(getContext());
+        call.resolve();
     }
 
     @PluginMethod
     public void setSettings(PluginCall call) {
         SharedPreferences.Editor e = prefs().edit();
-        String engine = call.getString("engine");
-        if (engine != null) e.putString("engine", engine);
-        Boolean live = call.getBoolean("live");
-        if (live != null) e.putBoolean("live", live);
-        Boolean mute = call.getBoolean("mute");
-        if (mute != null) e.putBoolean("mute", mute);
-        Boolean cap = call.getBoolean("cap");
-        if (cap != null) e.putBoolean("cap", cap);
-        String lang = call.getString("lang");
-        if (lang != null) e.putString("lang", lang.trim());
+        String[] strings = { "engine", "lang", "model", "context" };
+        for (String k : strings) {
+            String v = call.getString(k);
+            if (v != null) e.putString(k, v.trim());
+        }
+        String[] bools = { "mute", "cap", "autoPeriod" };
+        for (String k : bools) {
+            Boolean v = call.getBoolean(k);
+            if (v != null) e.putBoolean(k, v);
+        }
+        String key = call.getString("apiKey");
+        if (key != null) e.putString("apiKey", key.trim());
         e.apply();
         call.resolve(buildStatus());
     }
 
-    private String readTranscript() {
-        File f = DictationIME.transcriptFile(getContext());
-        if (!f.exists()) return "";
-        try (FileInputStream in = new FileInputStream(f)) {
-            byte[] b = new byte[(int) f.length()];
-            int off = 0;
-            while (off < b.length) {
-                int n = in.read(b, off, b.length - off);
-                if (n < 0) break;
-                off += n;
-            }
-            return new String(b, 0, off, StandardCharsets.UTF_8).trim();
-        } catch (Exception e) {
-            return "";
-        }
-    }
+    // ---------------------------------------------------------------- library
 
     @PluginMethod
-    public void transcript(PluginCall call) {
+    public void list(PluginCall call) {
         JSObject r = new JSObject();
-        r.put("text", readTranscript());
+        r.put("json", DictationStore.list(getContext()));
         call.resolve(r);
     }
 
     @PluginMethod
-    public void copyTranscript(PluginCall call) {
-        String text = call.getString("text");
-        if (text == null) text = readTranscript();
-        ClipboardManager cm = (ClipboardManager) getContext().getSystemService(Context.CLIPBOARD_SERVICE);
-        if (cm == null) { call.reject("No clipboard"); return; }
-        cm.setPrimaryClip(ClipData.newPlainText("Dictation transcript", text));
+    public void load(PluginCall call) {
+        String s = DictationStore.load(getContext(), call.getString("id"));
+        if (s == null) { call.reject("Recording not found"); return; }
+        JSObject r = new JSObject();
+        r.put("json", s);
+        call.resolve(r);
+    }
+
+    @PluginMethod
+    public void save(PluginCall call) {
+        if (DictationStore.save(getContext(), call.getString("id"), call.getString("json"))) call.resolve();
+        else call.reject("Could not save recording");
+    }
+
+    @PluginMethod
+    public void remove(PluginCall call) {
+        DictationStore.delete(getContext(), call.getString("id"));
         call.resolve();
     }
 
     @PluginMethod
-    public void shareTranscript(PluginCall call) {
-        String text = call.getString("text");
-        if (text == null) text = readTranscript();
+    public void state(PluginCall call) {
+        JSObject r = new JSObject();
+        r.put("json", DictationStore.loadState(getContext()));
+        call.resolve(r);
+    }
+
+    @PluginMethod
+    public void setState(PluginCall call) {
+        DictationStore.saveState(getContext(), call.getString("json", "{}"));
+        call.resolve();
+    }
+
+    @PluginMethod
+    public void claude(PluginCall call) {
+        String body = call.getString("body");
+        if (body == null) { call.reject("Missing body"); return; }
+        new Thread(() -> {
+            try {
+                JSObject r = new JSObject();
+                r.put("json", ClaudeClient.send(getContext(), body));
+                call.resolve(r);
+            } catch (Exception e) {
+                call.reject(String.valueOf(e.getMessage()));
+            }
+        }).start();
+    }
+
+    // ---------------------------------------------------------------- text helpers
+
+    @PluginMethod
+    public void transcript(PluginCall call) {
+        String s = DictationStore.read(DictationStore.transcriptFile(getContext()));
+        JSObject r = new JSObject();
+        r.put("text", s == null ? "" : s.trim());
+        call.resolve(r);
+    }
+
+    @PluginMethod
+    public void copyText(PluginCall call) {
+        ClipboardManager cm = (ClipboardManager) getContext().getSystemService(Context.CLIPBOARD_SERVICE);
+        if (cm == null) { call.reject("No clipboard"); return; }
+        cm.setPrimaryClip(ClipData.newPlainText("AFS Dictation", call.getString("text", "")));
+        call.resolve();
+    }
+
+    @PluginMethod
+    public void shareText(PluginCall call) {
         try {
             Intent send = new Intent(Intent.ACTION_SEND);
             send.setType("text/plain");
-            send.putExtra(Intent.EXTRA_SUBJECT, "Dictation transcript");
-            send.putExtra(Intent.EXTRA_TEXT, text);
-            Intent chooser = Intent.createChooser(send, "Send transcript");
+            send.putExtra(Intent.EXTRA_SUBJECT, call.getString("subject", "Dictation"));
+            send.putExtra(Intent.EXTRA_TEXT, call.getString("text", ""));
+            Intent chooser = Intent.createChooser(send, "Send");
             chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             getContext().startActivity(chooser);
             call.resolve();
@@ -223,9 +265,7 @@ public class DictationPlugin extends Plugin {
 
     @PluginMethod
     public void clearTranscript(PluginCall call) {
-        try (FileOutputStream out = new FileOutputStream(DictationIME.transcriptFile(getContext()), false)) {
-            out.write(new byte[0]);
-        } catch (Exception ignored) { }
+        DictationStore.write(DictationStore.transcriptFile(getContext()), "");
         call.resolve(buildStatus());
     }
 }
