@@ -10,6 +10,7 @@ public class MainActivity extends BridgeActivity {
         // Local plugins must be registered before the bridge starts.
         registerPlugin(NarratorPlugin.class);
         registerPlugin(TemplateFilesPlugin.class);
+        registerPlugin(DictationPlugin.class);
         super.onCreate(savedInstanceState);
     }
 }

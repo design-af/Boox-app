@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- AFS Dictation keyboard (DictationIME). Settings opens the AFS Custom Boox hub. -->
+<input-method xmlns:android="http://schemas.android.com/apk/res/android"
+    android:settingsActivity="af.design.boox.MainActivity"
+    android:supportsSwitchingToNextInputMethod="true">
+    <subtype
+        android:label="Dictation"
+        android:imeSubtypeLocale="en_US"
+        android:imeSubtypeMode="voice" />
+</input-method>

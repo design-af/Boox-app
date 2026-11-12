@@ -41,12 +41,30 @@
             android:name=".NarrationService"
             android:exported="false"
             android:foregroundServiceType="mediaPlayback" />
+
+        <!-- AFS Dictation: a keyboard that types continuous speech into any app's text field. -->
+        <service
+            android:name=".DictationIME"
+            android:label="AFS Dictation"
+            android:permission="android.permission.BIND_INPUT_METHOD"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.view.InputMethod" />
+            </intent-filter>
+            <meta-data
+                android:name="android.view.im"
+                android:resource="@xml/dictation_method" />
+        </service>
     </application>
 
     <!-- TextToSpeech engines must be visible to the app on Android 11+. -->
     <queries>
         <intent>
             <action android:name="android.intent.action.TTS_SERVICE" />
+        </intent>
+        <!-- Speech recognition engines, for AFS Dictation. -->
+        <intent>
+            <action android:name="android.speech.RecognitionService" />
         </intent>
     </queries>
 
@@ -57,6 +75,7 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
     <!-- Template Maker saves to Documents/AFS Templates via MediaStore; the permission is only for Android 9 and older. -->
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" />
