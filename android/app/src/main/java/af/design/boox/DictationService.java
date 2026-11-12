@@ -87,6 +87,9 @@ public class DictationService extends Service {
     private boolean panelOpen;
     private int imeTop = -1;          // top of the on-screen keyboard, from DictationAccessibility
     private long lastPartialAt;       // partials are throttled: each one redraws the e-ink screen
+    private boolean speechActive;     // words heard since the last final result
+    private boolean cutPending;       // Prep ▸ asked to finish the current sentence
+    private final Runnable cutFallback = () -> { if (cutPending) { cutPending = false; js("KB.onCut()"); } };
     private boolean jsReady;
     private final ArrayList<String> queued = new ArrayList<>();
 
@@ -516,6 +519,20 @@ public class DictationService extends Service {
         }
         @JavascriptInterface public void start() { main.post(DictationService.this::startRec); }
         @JavascriptInterface public void stop() { main.post(() -> stopRec("Stopped")); }
+        /** Finish the sentence being spoken now; KB.onCut() follows its phrase. */
+        @JavascriptInterface public void cut() {
+            main.post(() -> {
+                if (running && recognizer != null && speechActive) {
+                    cutPending = true;
+                    try { recognizer.stopListening(); } catch (Exception e) { cutFallback.run(); return; }
+                    main.removeCallbacks(cutFallback);
+                    main.postDelayed(cutFallback, 5000);
+                } else {
+                    js("KB.onCut()");
+                }
+            });
+        }
+        @JavascriptInterface public void remove(String id) { DictationStore.delete(DictationService.this, id); }
         @JavascriptInterface public void collapse() { main.post(() -> setPanelOpen(false)); }
         @JavascriptInterface public void quit() { main.post(DictationService.this::stopSelf); }
         @JavascriptInterface public void openApp(String page) { main.post(() -> { setPanelOpen(false); DictationService.this.openApp(page); }); }
@@ -604,6 +621,12 @@ public class DictationService extends Service {
     private void stopRec(String why) {
         boolean was = running;
         running = false;
+        speechActive = false;
+        if (cutPending) {
+            cutPending = false;
+            main.removeCallbacks(cutFallback);
+            js("KB.onCut()");
+        }
         main.removeCallbacks(listenRunnable);
         if (recognizer != null) {
             try { recognizer.cancel(); } catch (Exception ignored) { }
@@ -661,6 +684,7 @@ public class DictationService extends Service {
         i.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 15000L);
         if (Build.VERSION.SDK_INT >= 33) i.putExtra("android.speech.extra.ENABLE_FORMATTING", "quality");
         listenStartedAt = SystemClock.elapsedRealtime();
+        speechActive = false;
         try {
             recognizer.startListening(i);
         } catch (Exception e) {
@@ -701,14 +725,16 @@ public class DictationService extends Service {
         @Override public void onReadyForSpeech(Bundle params) {
             if (running) state("Listening" + (usingDevice ? " (on-device)" : ""));
         }
-        @Override public void onBeginningOfSpeech() { }
+        @Override public void onBeginningOfSpeech() { speechActive = true; }
         @Override public void onRmsChanged(float rmsdB) { }
         @Override public void onBufferReceived(byte[] buffer) { }
         @Override public void onEndOfSpeech() { }
         @Override public void onEvent(int eventType, Bundle params) { }
 
         @Override public void onPartialResults(Bundle b) {
-            if (!running || b == null || !panelOpen) return;
+            if (!running || b == null) return;
+            speechActive = true;
+            if (!panelOpen) return;
             long now = SystemClock.elapsedRealtime();
             if (now - lastPartialAt < 700) return;
             lastPartialAt = now;
@@ -718,6 +744,12 @@ public class DictationService extends Service {
 
         @Override public void onResults(Bundle b) {
             deliverPhrase(b);
+            speechActive = false;
+            if (cutPending) {
+                cutPending = false;
+                main.removeCallbacks(cutFallback);
+                js("KB.onCut()");
+            }
             js("KB.onPartial(\"\")");
             quickErrors = 0;
             if (running) {
@@ -727,6 +759,12 @@ public class DictationService extends Service {
         }
 
         @Override public void onError(int error) {
+            speechActive = false;
+            if (cutPending) {
+                cutPending = false;
+                main.removeCallbacks(cutFallback);
+                js("KB.onCut()");
+            }
             if (!running) return;
             js("KB.onPartial(\"\")");
             switch (error) {

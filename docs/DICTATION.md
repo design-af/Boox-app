@@ -41,3 +41,8 @@ Flow: **Live → Prep → Push**, every recording kept in a **Library**.
   is open and at most ~1/s (each redraw is an e-ink refresh); folded panel draws nothing; Live
   shows only the last 40 phrases; Live saved every 15 s (and on stop/fold/move/actions) instead
   of per phrase, no fsync; accessibility listens only to focus + window changes, never keystrokes.
+- Build 22: Live's buttons are Prep ▸ / Clear / Undo. Prep ▸ while recording calls native `cut()`
+  (recognizer.stopListening → final phrase → `KB.onCut`), so the sentence being spoken ends up
+  in the segment; then the segment moves to Prep and is processed automatically (local check +
+  Claude check and key points in parallel, if a key is set). Clear removes the Live recording;
+  Undo restores it, keeping anything heard since after it.

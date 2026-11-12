@@ -57,7 +57,18 @@
   function doUndo() {
     const u = undo.pop();
     if (!u) { msg('Nothing to undo'); return; }
-    if (u.kind === 'state') {
+    if (u.kind === 'clear') {
+      // Bring the cleared Live text back; anything heard since is kept after it.
+      const rec = JSON.parse(u.json);
+      if (live && live.id !== rec.id) {
+        for (const p of live.phrases) { p.id = rec.nextPid++; rec.phrases.push(p); }
+        N.remove(live.id);
+      }
+      live = rec;
+      st.liveId = rec.id;
+      save(live);
+      saveState();
+    } else if (u.kind === 'state') {
       st = JSON.parse(u.json);
       saveState();
       live = load(st.liveId);
@@ -240,7 +251,6 @@
     $('push').innerHTML = prepView === 'points' ? 'Push pts &#9656;' : 'Push &#9656;';
     $('start').innerHTML = running ? '&#9632; Stop' : '&#9679; Start';
     $('start').className = running ? 'dark' : '';
-    $('para').className = pending.br ? 'on' : '';
   }
 
   function renderAll() {
@@ -277,6 +287,13 @@
       if (!panelOpen) return;
       renderChrome();
       if (tab === 'live') renderContent();
+    },
+    onCut() {
+      if (!cutting) return;
+      clearTimeout(cutTimer);
+      cutting = false;
+      $('move').disabled = false;
+      moveToPrep();
     },
     onPanel(open) {
       panelOpen = !!open;
@@ -320,6 +337,31 @@
     renderAll();
   }
 
+  // Prep ▸ while recording: the recogniser first finishes the sentence being spoken (native
+  // cut), that phrase lands in Live, then Live becomes a Prep segment and recording carries on
+  // into a new Live segment. The segment is then processed (Check + Key points) automatically.
+  let cutting = false, cutTimer = 0;
+  function prepClick() {
+    if (cutting) return;
+    if (!running) { moveToPrep(); return; }
+    cutting = true;
+    $('move').disabled = true;
+    msg('Finishing the sentence\u2026', true);
+    N.cut();
+    cutTimer = setTimeout(() => KB.onCut(), 6000);
+  }
+
+  function clearLive() {
+    if (!live || !live.phrases.length) { msg('Live is already empty'); return; }
+    undo.push({ kind: 'clear', json: JSON.stringify(live) });
+    N.remove(live.id);
+    live = null;
+    st.liveId = null;
+    saveState();
+    msg('Live cleared \u2014 Undo brings it back');
+    renderAll();
+  }
+
   function moveToPrep() {
     if (!live || !live.phrases.length) { msg('Nothing in Live yet'); return; }
     save(live);
@@ -331,19 +373,42 @@
     saveState();
     flagIdx = -1; selWord = null; prepView = 'text';
     tab = 'prep';
-    msg(running ? 'Moved to Prep. Still recording — new words start a new Live recording.' : 'Moved to Prep.');
+    renderAll();
+    processSegment(prep);
+  }
+
+  /** Check + Key points for a segment that just arrived in Prep. */
+  async function processSegment(rec) {
+    const local = K.localCheck(rec);
+    save(rec);
+    const cont = running ? ' Still recording into the next segment.' : '';
+    if (!settings.hasKey) {
+      if (prep === rec && tab === 'prep') flagIdx = rec.flags.length ? 0 : -1;
+      msg((rec.flags.length ? rec.flags.length + ' unsure words to review.' : 'Moved to Prep.') + cont, true);
+      renderAll();
+      return;
+    }
+    setBusy(true, 'Processing: checking words and writing key points\u2026' + cont);
+    const wantPoints = K.wordCount(rec) >= 15;
+    const [audit, points] = await Promise.allSettled([
+      claude(K.auditRequest(rec, opts(), settings.context)),
+      wantPoints ? claude(K.summaryRequest(rec, opts(), settings.context)) : Promise.resolve(null),
+    ]);
+    const problems = [];
+    if (audit.status === 'fulfilled') { try { K.applyAudit(rec, audit.value); } catch (e) { problems.push('check: ' + e.message); } }
+    else problems.push('check: ' + audit.reason.message);
+    if (points.status === 'fulfilled' && points.value) { try { K.applySummary(rec, points.value); } catch (e) { problems.push('key points: ' + e.message); } }
+    else if (points.status === 'rejected') problems.push('key points: ' + points.reason.message);
+    save(rec);
+    setBusy(false);
+    if (prep === rec && tab === 'prep' && prepView === 'text') flagIdx = rec.flags.length ? 0 : -1;
+    const done = [];
+    done.push(rec.flags.length ? rec.flags.length + ' to review' : 'nothing looks misheard');
+    if (rec.summary) done.push('key points ready');
+    msg('Ready: ' + done.join(', ') + '.' + (problems.length ? ' (' + problems.join('; ') + ')' : '') + cont, true);
     renderAll();
   }
 
-  function punct(ch) {
-    if (partial) { pending.end = ch; msg('“' + ch + '” will end the phrase being heard'); return; }
-    const p = live && live.phrases[live.phrases.length - 1];
-    if (!p) { pending.end = ch; return; }
-    snapshot('live');
-    p.end = ch;
-    save(live);
-    renderContent();
-  }
 
   async function check() {
     if (!prep || busy) return;
@@ -469,13 +534,8 @@
   $('t-lib').onclick = () => setTab('library');
   $('start').onclick = () => (running ? N.stop() : N.start());
   $('min').onclick = () => N.collapse();
-  $('move').onclick = moveToPrep;
-  document.querySelectorAll('[data-punct]').forEach((b) => { b.onclick = () => punct(b.dataset.punct); });
-  $('para').onclick = () => { pending.br = !pending.br; msg(pending.br ? 'Next phrase starts a new paragraph' : ''); renderChrome(); };
-  $('bksp').onclick = () => {
-    if (!live || !live.phrases.length) return;
-    snapshot('live'); K.deleteLastWord(live); save(live); renderAll();
-  };
+  $('move').onclick = prepClick;
+  $('clear').onclick = clearLive;
   $('check').onclick = check;
   $('points').onclick = keyPoints;
   $('view').onclick = () => { prepView = prepView === 'points' ? 'text' : 'points'; flagIdx = -1; selWord = null; renderAll(); };
@@ -528,6 +588,8 @@
       },
       stop() { clearInterval(self._timer); KB.onState(false, 'Stopped'); },
       push(t) { console.log('PUSH', t); setTimeout(() => KB.onPushed('pasted'), 50); },
+      cut() { setTimeout(() => { KB.onPhrase(JSON.stringify({ text: 'and that is the end of the sentence' })); KB.onCut(); }, 300); },
+      remove(id) { ls.removeItem('rec:' + id); },
       list() {
         const out = [];
         for (let i = 0; i < ls.length; i++) {
