@@ -264,7 +264,7 @@
   }
 
   /** "Jane Doe (Perkins&Will)" -> "Jane Doe" for chips and labels. */
-  const shortName = (n) => String(n || '').replace(/\s*[(\[].*$/, '').trim();
+  const shortName = (n) => String(n || '').split(/\s*(?:[(\[|,;]|\s[\u2013\u2014-]\s|\s[\u2013\u2014]|:)/)[0].trim();
 
   /**
    * Names a recording's speakers after a session's speakers: A = first listed, B = second, …
@@ -588,7 +588,7 @@
     const content = [];
     (images || []).forEach((im) => content.push({ type: 'image', source: { type: 'base64', media_type: im.media_type || 'image/jpeg', data: im.data } }));
     let ask = 'Read this event programme (a lecture brief, agenda or symposium schedule) and report its sessions in order. ' +
-      'For each session give the start time as written (or empty), a short title, and the speakers’ names (with their firm or role in brackets when shown). ' +
+      'For each session give the start time as written (or empty), a short title, and its speakers. For each speaker, put only the person\u2019s name in name, and their job title or role and their company or organisation in the separate fields (empty when not shown). ' +
       'Leave out breaks, lunch and registration unless they have a speaker. Do not invent anything that is not shown.';
     if (pageText) ask += '\n\nText of the web page' + (url ? ' (' + url + ')' : '') + ':\n' + String(pageText).slice(0, 60000);
     content.push({ type: 'text', text: ask + useTool('report_symposium') });
@@ -610,7 +610,18 @@
                 properties: {
                   time: { type: 'string' },
                   title: { type: 'string' },
-                  speakers: { type: 'array', items: { type: 'string' } },
+                  speakers: {
+                    type: 'array',
+                    items: {
+                      type: 'object',
+                      properties: {
+                        name: { type: 'string', description: 'the person\u2019s name only, e.g. Jane Doe' },
+                        role: { type: 'string', description: 'job title or role, if shown' },
+                        organization: { type: 'string', description: 'company or organisation, if shown' },
+                      },
+                      required: ['name'],
+                    },
+                  },
                   room: { type: 'string' },
                 },
                 required: ['title'],
@@ -633,11 +644,26 @@
       sessions: (d.sessions || []).map((x) => ({
         time: String(x.time || '').trim(),
         title: String(x.title || '').trim(),
-        speakers: (x.speakers || []).map((n) => String(n).trim()).filter(Boolean),
+        // Names only for chips and labels; role and company kept separately for display.
+        people: (x.speakers || []).map(toPerson).filter((p) => p.name),
+        speakers: (x.speakers || []).map(toPerson).map((p) => p.name).filter(Boolean),
         room: String(x.room || '').trim(),
       })).filter((x) => x.title || x.speakers.length),
     };
   }
+
+  /** A speaker from Claude (object or text) as { name, role, org }. */
+  function toPerson(sp) {
+    if (sp && typeof sp === 'object') {
+      return { name: shortName(sp.name), role: String(sp.role || '').trim(), org: String(sp.organization || sp.org || '').trim() };
+    }
+    const t = String(sp || '').trim();
+    const name = shortName(t);
+    const rest = t.slice(name.length).replace(/^[\s(\[,;|:\u2013\u2014-]+|[)\]\s]+$/g, '').trim();
+    return { name, role: rest, org: '' };
+  }
+
+  const personLine = (p) => p.name + ([p.role, p.org].filter(Boolean).length ? ' \u2014 ' + [p.role, p.org].filter(Boolean).join(', ') : '');
 
   const sessionName = (x) => [x.time, x.title || x.speakers.join(', ')].filter(Boolean).join(' · ');
 
@@ -650,6 +676,7 @@
       const g = newGroup(sessionName(x), now + i);
       g.event = event; g.eventId = eventId; g.order = i;
       g.time = x.time; g.title = x.title; g.speakers = x.speakers.slice(); g.room = x.room || '';
+      g.people = (x.people || []).slice();
       return g;
     });
     data.groups = data.groups.concat(made);
@@ -694,7 +721,7 @@
   function updateSession(g, f) {
     if ('time' in f) g.time = String(f.time || '').trim();
     if ('title' in f) g.title = String(f.title || '').trim();
-    if ('speakers' in f) g.speakers = (Array.isArray(f.speakers) ? f.speakers : String(f.speakers || '').split(',')).map((t) => String(t).trim()).filter(Boolean);
+    if ('speakers' in f) g.speakers = (Array.isArray(f.speakers) ? f.speakers : String(f.speakers || '').split(',')).map((t) => shortName(t)).filter(Boolean);
     g.name = sessionName({ time: g.time || '', title: g.title || '', speakers: g.speakers || [] }) || g.name;
     g.updated = Date.now();
     return g;
@@ -743,7 +770,7 @@
     renameSpeaker, currentSpeaker, splitTurn, shortName, applySessionSpeakers, clearTurn, unknownTurnFlags, resolveSpeakerFlag, dismissSpeakerFlag,
     speakerRequest, applySpeakers, newGroup, assignToGroup, removeFromGroups, groupOf, groupSummaryRequest,
     groupKeyPointsText, symposiumRequest, parseSymposium, sessionName, makeSessionGroups, ensureEvents, eventSessions,
-    newEvent, renameEvent, updateSession, addSession, deleteGroup, deleteEvent, unsortedIds,
+    toPerson, personLine, newEvent, renameEvent, updateSession, addSession, deleteGroup, deleteEvent, unsortedIds,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.KBCore = api;

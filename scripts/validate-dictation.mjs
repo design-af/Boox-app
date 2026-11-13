@@ -160,4 +160,18 @@ K.deleteEvent(md, evId);
 assert.equal(md.groups.length, 0);
 assert.deepEqual(md.events.map((e) => e.name), ['Empty forum']);
 
+// Speakers are names only; roles and companies are kept apart.
+for (const [raw, want] of [['Jane Doe (Principal, Perkins&Will)', 'Jane Doe'], ['Jane Doe, Principal, Perkins&Will', 'Jane Doe'],
+  ['Jane Doe — Perkins&Will', 'Jane Doe'], ['Jane Doe | CEO', 'Jane Doe'], ['A. Lee', 'A. Lee'], ['Mary-Kate Smith', 'Mary-Kate Smith']]) {
+  assert.equal(K.shortName(raw), want, raw);
+}
+const ppl = K.parseSymposium({ content: [{ type: 'tool_use', name: 'report_symposium', input: { event: 'X', sessions: [
+  { time: '9:00', title: 'Keynote', speakers: [{ name: 'Jane Doe', role: 'Principal', organization: 'Perkins&Will' }, 'A. Lee (Moderator)'] },
+] } }] });
+assert.deepEqual(ppl.sessions[0].speakers, ['Jane Doe', 'A. Lee']);
+assert.equal(K.personLine(ppl.sessions[0].people[0]), 'Jane Doe — Principal, Perkins&Will');
+assert.equal(ppl.sessions[0].people[1].role, 'Moderator');
+const sx = K.addSession({ groups: [], events: [{ id: 'e1', name: 'E' }] }, 'e1', { title: 'T', speakers: 'Jane Doe (P+W), B. Kim, Principal' });
+assert.deepEqual(sx.speakers, ['Jane Doe', 'B. Kim', 'Principal'], 'typed list keeps each comma entry, minus brackets');
+
 console.log('Dictation: recording logic checks out.');

@@ -229,6 +229,9 @@
       if (document.activeElement !== $('g-time')) $('g-time').value = g.time || '';
       if (document.activeElement !== $('g-title')) $('g-title').value = g.title || '';
       if (document.activeElement !== $('g-speakers')) $('g-speakers').value = (g.speakers || []).join(', ');
+      const ppl = (g.people || []).filter((p) => (g.speakers || []).includes(p.name) && (p.role || p.org));
+      $('g-people').textContent = ppl.map(K.personLine).join(' \u00B7 ');
+      $('g-people').hidden = !ppl.length;
     } else if (document.activeElement !== $('g-name')) $('g-name').value = g.name;
     if (document.activeElement !== $('g-points')) $('g-points').value = g.summary || '';
     const ms = g.ids.map(meta).filter(Boolean).sort((a, b) => (a.created || 0) - (b.created || 0));
@@ -492,19 +495,22 @@
       '<div class="sess" data-i="' + i + '">' +
       '<input type="text" aria-label="Time" placeholder="Time" data-f="time" value="' + esc(x.time) + '">' +
       '<input type="text" aria-label="Title" placeholder="Title" data-f="title" value="' + esc(x.title) + '">' +
-      '<input class="who" type="text" aria-label="Speakers" placeholder="Speakers, separated by commas" data-f="speakers" value="' + esc(x.speakers.join(', ')) + '">' +
+      '<input class="who" type="text" aria-label="Speakers" placeholder="Speakers\u2019 names, separated by commas" data-f="speakers" value="' + esc(x.speakers.join(', ')) + '">' +
+      ((x.people || []).some((p) => p.role || p.org) ? '<span class="hint who">' + esc((x.people || []).filter((p) => p.role || p.org).map(K.personLine).join(' \u00B7 ')) + '</span>' : '') +
       '<button data-rm="' + i + '">Remove</button></div>').join('');
   }
 
   function collectSymp() {
     if (!syData) syData = { event: '', date: '', sessions: [] };
     syData.event = $('sy-event').value.trim();
-    syData.sessions = Array.from($('sy-list').querySelectorAll('.sess')).map((el) => ({
-      time: el.querySelector('[data-f="time"]').value.trim(),
-      title: el.querySelector('[data-f="title"]').value.trim(),
-      speakers: el.querySelector('[data-f="speakers"]').value.split(',').map((t) => t.trim()).filter(Boolean),
-      room: '',
-    }));
+    const before = syData.sessions || [];
+    syData.sessions = Array.from($('sy-list').querySelectorAll('.sess')).map((el) => {
+      const old = before[Number(el.dataset.i)] || {};
+      const speakers = el.querySelector('[data-f="speakers"]').value.split(',').map((t) => K.shortName(t)).filter(Boolean);
+      // Keep the role/company Claude read for any name that is still there.
+      const people = speakers.map((n) => (old.people || []).find((p) => p.name === n) || { name: n, role: '', org: '' });
+      return { time: el.querySelector('[data-f="time"]').value.trim(), title: el.querySelector('[data-f="title"]').value.trim(), speakers, people, room: '' };
+    });
   }
 
   async function createSymposium() {
