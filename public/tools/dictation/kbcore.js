@@ -21,6 +21,10 @@
   const END_PUNCT = /[.?!,;:…]$/;
   const SENT_END = /[.?!…]["'”’)\]]*$/;
 
+  // Speaker marking (chips, word splits, bubble double-tap, labels, Speakers check) is switched
+  // off for now; its code stays here so it can come back by setting this to true.
+  const SPEAKERS = false;
+
   const words = (s) => String(s == null ? '' : s).trim().split(/\s+/).filter(Boolean);
   const norm = (w) => String(w).toLowerCase().replace(/[^\p{L}\p{N}']+/gu, '');
   const capFirst = (w) => w.replace(/^(["'“‘(\[]*)(\p{Ll})/u, (m, a, b) => a + b.toUpperCase());
@@ -166,7 +170,7 @@
     rec.flags = rec.flags.filter((f) => f.src === 'ai' || f.src === 'spk-ai' || (f.src === 'unk' && f.sugg && f.sugg.length));
     let n = 0;
     for (const p of rec.phrases) for (const f of altFlags(p)) if (addFlag(rec, f)) n++;
-    unknownTurnFlags(rec);
+    if (SPEAKERS) unknownTurnFlags(rec);
     sortFlags(rec);
     return n;
   }
@@ -257,6 +261,7 @@
 
   /** Labels appear once a second speaker (or an unknown turn) is in the text. */
   function usesLabels(rec) {
+    if (!SPEAKERS) return false;
     const turns = new Set(render(rec, { autoPeriod: false, cap: false }).filter((r) => r.spk).map((r) => r.spk));
     // Named speakers (e.g. from the session's programme) are labelled from the first sentence.
     const named = Object.values(rec.speakers || {}).some((n) => n);
@@ -741,6 +746,38 @@
     return g;
   }
 
+  /** A session on its own (not in a group yet), e.g. made from the floating panel. */
+  function newSession(data, f, now) {
+    now = now || Date.now();
+    const g = newGroup('Session', now);
+    updateSession(g, { time: (f && f.time) || '', title: (f && f.title) || '', speakers: (f && f.speakers) || [] });
+    if (!g.title && !g.time) { g.title = 'New session'; g.name = 'New session'; }
+    data.groups.push(g);
+    return g;
+  }
+
+  /** Puts a session into a group (event), or takes it out (eventId empty). */
+  function setSessionEvent(data, gid, eventId) {
+    ensureEvents(data);
+    const g = data.groups.find((x) => x.id === gid);
+    if (!g) return;
+    if (!eventId) { delete g.eventId; delete g.event; delete g.order; g.updated = Date.now(); return; }
+    const e = data.events.find((x) => x.id === eventId);
+    if (!e || g.eventId === eventId) return;
+    const list = eventSessions(data, eventId);
+    g.eventId = eventId;
+    g.event = e.name;
+    g.order = list.length ? Math.max(...list.map((x) => x.order || 0)) + 1 : 0;
+    g.updated = Date.now();
+  }
+
+  /** Deletes a group but keeps its sessions (they become "not in a group"). */
+  function dissolveEvent(data, id) {
+    ensureEvents(data);
+    data.groups.forEach((g) => { if (g.eventId === id) { delete g.eventId; delete g.event; delete g.order; } });
+    data.events = data.events.filter((e) => e.id !== id);
+  }
+
   /** Removes a session or group; its recordings become unsorted. */
   function deleteGroup(data, gid) { data.groups = data.groups.filter((g) => g.id !== gid); }
 
@@ -770,7 +807,7 @@
     renameSpeaker, currentSpeaker, splitTurn, shortName, applySessionSpeakers, clearTurn, unknownTurnFlags, resolveSpeakerFlag, dismissSpeakerFlag,
     speakerRequest, applySpeakers, newGroup, assignToGroup, removeFromGroups, groupOf, groupSummaryRequest,
     groupKeyPointsText, symposiumRequest, parseSymposium, sessionName, makeSessionGroups, ensureEvents, eventSessions,
-    toPerson, personLine, newEvent, renameEvent, updateSession, addSession, deleteGroup, deleteEvent, unsortedIds,
+    SPEAKERS, newSession, setSessionEvent, dissolveEvent, toPerson, personLine, newEvent, renameEvent, updateSession, addSession, deleteGroup, deleteEvent, unsortedIds,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.KBCore = api;

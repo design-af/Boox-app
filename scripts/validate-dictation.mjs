@@ -75,6 +75,7 @@ K.applySummary(g, { content: [{ type: 'text', text: 'Title: Big day\n- one' }] }
 assert.equal(g.summary, '- one');
 assert.ok(K.groupKeyPointsText(g).startsWith('Key points \u2014 Day 1\n- one'));
 
+if (K.SPEAKERS) {
 // Speakers.
 const sp = K.newRecording();
 K.addPhrase(sp, { text: 'so that is where the industry is heading' });
@@ -118,6 +119,8 @@ assert.equal(K.speakerRequest(sp, {}, '').tools[0].name, 'report_speakers');
 // A model that answers in text instead of the tool still works.
 const textSym = K.parseSymposium({ content: [{ type: 'text', text: 'Here you go:\n{"event":"Day","sessions":[{"time":"9:00","title":"Opening","speakers":["X"]}]}' }] });
 assert.equal(textSym.sessions[0].title, 'Opening');
+
+}
 
 // Symposium from an agenda.
 const symReq = K.symposiumRequest([{ media_type: 'image/jpeg', data: 'AAAA' }], 'Agenda text', 'https://example.org/agenda');
@@ -173,5 +176,21 @@ assert.equal(K.personLine(ppl.sessions[0].people[0]), 'Jane Doe — Principal, P
 assert.equal(ppl.sessions[0].people[1].role, 'Moderator');
 const sx = K.addSession({ groups: [], events: [{ id: 'e1', name: 'E' }] }, 'e1', { title: 'T', speakers: 'Jane Doe (P+W), B. Kim, Principal' });
 assert.deepEqual(sx.speakers, ['Jane Doe', 'B. Kim', 'Principal'], 'typed list keeps each comma entry, minus brackets');
+
+// Sessions made on their own, put into a group later; deleting a group keeps its sessions.
+const sd = { groups: [], events: [] };
+const loose = K.newSession(sd, {});
+assert.equal(loose.name, 'New session');
+assert.equal(loose.eventId, undefined);
+const ev = K.newEvent(sd, 'Conference');
+K.setSessionEvent(sd, loose.id, ev.id);
+assert.equal(K.eventSessions(sd, ev.id)[0].id, loose.id);
+K.setSessionEvent(sd, loose.id, '');
+assert.equal(K.eventSessions(sd, ev.id).length, 0);
+K.setSessionEvent(sd, loose.id, ev.id);
+K.dissolveEvent(sd, ev.id);
+assert.equal(sd.groups.length, 1, 'session survives its group');
+assert.equal(sd.events.length, 0);
+assert.equal(K.SPEAKERS, false);
 
 console.log('Dictation: recording logic checks out.');

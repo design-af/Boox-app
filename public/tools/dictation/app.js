@@ -1,10 +1,12 @@
 // Aside Transcribe app page.
-// Tabs: Library, Setup, Settings. The Library drills down one level per screen:
-//   Library home  → Unsorted (recordings in no session/group; assign or delete them)
-//                 → a Symposium (rename, sessions in order, add session, delete)
-//                     → a Session (time/title/speakers, recordings, key points, delete)
-//                 → a Group (same as a session, with a name instead of time/title/speakers)
+// Tabs: Library, Setup, Settings. Recordings go into sessions; sessions can be put in groups.
+//   Library home  → Unsorted (recordings in no session; assign or delete them)
+//                 → Groups, newest first, each collapsible to its sessions (a group page renames,
+//                   adds sessions, deletes the group but keeps its sessions)
+//                 → Sessions not in a group, newest first
+//   a session     → time/title, group, recordings, key points, delete
 //   any recording → Recording page (edit text, key points, move, Prep, delete)
+// (In the stored data a group is an "event" and a session a "group" entry, for compatibility.)
 // Native side: DictationPlugin. Shared logic: kbcore.js.
 (function () {
   'use strict';
@@ -83,7 +85,7 @@
 
   const SECTIONS = ['library', 'setup', 'settings', 'unsorted', 'event', 'group', 'assign', 'pick', 'symp', 'rec'];
   const TABS = ['library', 'setup', 'settings'];
-  const TITLES = { unsorted: 'Unsorted', event: 'Symposium', assign: 'Assign to…', pick: 'Add recordings', symp: 'New symposium', rec: 'Recording' };
+  const TITLES = { unsorted: 'Unsorted', event: 'Group', assign: 'Assign to…', pick: 'Add recordings', symp: 'New group', rec: 'Recording' };
 
   function show(v, id) {
     view = v;
@@ -94,7 +96,7 @@
     if (TABS.includes(v)) { $('heading').textContent = 'Aside Transcribe'; $('back').textContent = '← Tools'; }
     else {
       const g = v === 'group' ? groupById(viewId) : null;
-      $('heading').textContent = v === 'group' ? (g && g.eventId ? 'Session' : 'Group') : TITLES[v];
+      $('heading').textContent = v === 'group' ? 'Session' : TITLES[v];
       $('back').textContent = '← Back';
     }
     $('middle').scrollTop = 0;
@@ -151,6 +153,30 @@
 
   // ---------------------------------------------------------------- Library home
 
+  /** Latest activity of a session: made, edited, or a recording added. */
+  function sessionLatest(g) {
+    let t = Math.max(g.created || 0, g.updated || 0);
+    g.ids.forEach((id) => { const m = meta(id); if (m) t = Math.max(t, m.created || 0, m.updated || 0); });
+    return t;
+  }
+  const eventLatest = (e) => Math.max(e.created || 0, ...K.eventSessions(data, e.id).map(sessionLatest));
+
+  function sessionSub(g) {
+    const sub = [plural(g.ids.length, 'recording', 'recordings')];
+    if (g.summary) sub.push('key points ✓');
+    const t = sessionLatest(g);
+    if (t) sub.push(when(t));
+    return sub.join(' · ');
+  }
+
+  // Which groups are folded, remembered on this tablet. New groups start open.
+  function folded() { try { return JSON.parse(localStorage.getItem('aside.folded') || '{}'); } catch (e) { return {}; } }
+  function setFolded(id, on) {
+    const f = folded();
+    if (on) f[id] = true; else delete f[id];
+    try { localStorage.setItem('aside.folded', JSON.stringify(f)); } catch (e) { }
+  }
+
   function renderHome() {
     const out = [];
     const u = unsorted();
@@ -158,19 +184,26 @@
     out.push('<ul class="lib boxed inbox" style="margin-top:4px">' + navRow('data-nav', 'unsorted', 'Unsorted',
       u.length ? plural(u.length, 'recording', 'recordings') + ' not in a session · newest ' + when(newest) : 'Nothing to sort') + '</ul>');
 
-    const evs = data.events.slice().sort((a, b) => (b.created || 0) - (a.created || 0));
-    out.push('<div class="home-h">Symposiums</div>');
+    // Groups, newest activity first, each folding open to its sessions.
+    const f = folded();
+    const evs = data.events.slice().sort((a, b) => eventLatest(b) - eventLatest(a));
+    out.push('<div class="home-h">Groups</div>');
     if (evs.length) {
-      out.push('<ul class="lib boxed">' + evs.map((e) => {
+      evs.forEach((e) => {
         const ss = K.eventSessions(data, e.id);
-        return navRow('data-event', e.id, e.name, plural(ss.length, 'session', 'sessions') + ' · ' + plural(recCount(ss), 'recording', 'recordings'));
-      }).join('') + '</ul>');
-    } else out.push('<p class="empty">None yet. Tap New symposium to set one up from a programme, or type it in.</p>');
+        out.push('<section class="grp' + (f[e.id] ? ' closed' : '') + '"><div class="grp-h"><button class="open" data-toggle="' + esc(e.id) + '" aria-expanded="' + !f[e.id] + '">' +
+          '<span class="t">' + esc(e.name) + '</span><span class="m">' + plural(ss.length, 'session', 'sessions') + ' · ' + plural(recCount(ss), 'recording', 'recordings') + '</span></button>' +
+          '<button class="kp" data-event="' + esc(e.id) + '">Edit</button></div>' +
+          (ss.length ? '<ul class="lib">' + ss.map((g) => navRow('data-group', g.id, g.name, sessionSub(g))).join('') + '</ul>'
+            : '<p class="empty" style="padding:12px">No sessions yet. Tap Edit, then + Add session.</p>') + '</section>');
+      });
+    } else out.push('<p class="empty">None yet. Tap New group to set one up from a programme, or type it in.</p>');
 
-    const plain = data.groups.filter((g) => !g.eventId).sort((a, b) => (b.updated || 0) - (a.updated || 0));
-    if (plain.length) {
-      out.push('<div class="home-h">Groups</div><ul class="lib boxed">' + plain.map((g) =>
-        navRow('data-group', g.id, g.name, plural(g.ids.length, 'recording', 'recordings') + (g.summary ? ' · key points ✓' : ''))).join('') + '</ul>');
+    // Sessions not in a group, newest first.
+    const loose = data.groups.filter((g) => !g.eventId).sort((a, b) => sessionLatest(b) - sessionLatest(a));
+    if (loose.length) {
+      out.push('<div class="home-h">Sessions not in a group</div><ul class="lib boxed">' +
+        loose.map((g) => navRow('data-group', g.id, g.name, sessionSub(g))).join('') + '</ul>');
     }
     $('lib-home').innerHTML = out.join('');
   }
@@ -212,7 +245,7 @@
       if (g.summary) sub.push('key points ✓');
       return navRow('data-group', g.id, g.name, sub.join(' · '));
     }).join('') : '<li><p class="empty" style="padding:12px">No sessions yet. Tap + Add session.</p></li>';
-    $('e-delete').textContent = 'Delete symposium…';
+    $('e-delete').textContent = 'Delete group…';
   }
 
   // ---------------------------------------------------------------- Session / group
@@ -220,33 +253,31 @@
   function renderGroup() {
     const g = groupById(viewId);
     if (!g) return;
-    const isSession = !!g.eventId;
-    $('g-session-fields').hidden = !isSession;
-    $('g-group-fields').hidden = isSession;
-    if (isSession) {
-      const e = eventById(g.eventId);
-      $('g-event').textContent = e ? e.name : '';
-      if (document.activeElement !== $('g-time')) $('g-time').value = g.time || '';
-      if (document.activeElement !== $('g-title')) $('g-title').value = g.title || '';
-      if (document.activeElement !== $('g-speakers')) $('g-speakers').value = (g.speakers || []).join(', ');
-      const ppl = (g.people || []).filter((p) => (g.speakers || []).includes(p.name) && (p.role || p.org));
-      $('g-people').textContent = ppl.map(K.personLine).join(' \u00B7 ');
-      $('g-people').hidden = !ppl.length;
-    } else if (document.activeElement !== $('g-name')) $('g-name').value = g.name;
+    const e = g.eventId ? eventById(g.eventId) : null;
+    $('g-event').textContent = e ? e.name : 'Not in a group';
+    if (document.activeElement !== $('g-time')) $('g-time').value = g.time || '';
+    // Older sessions only had a name: show it as the title.
+    if (document.activeElement !== $('g-title')) $('g-title').value = g.title || (!g.time ? g.name : '');
+    if (document.activeElement !== $('g-speakers')) $('g-speakers').value = (g.speakers || []).join(', ');
+    const ppl = (g.people || []).filter((p) => (g.speakers || []).includes(p.name) && (p.role || p.org));
+    $('g-people').textContent = ppl.map(K.personLine).join(' · ');
+    $('g-people').hidden = !ppl.length;
+    $('g-groupsel').innerHTML = '<option value="">Not in a group</option>' +
+      data.events.slice().sort((a, b) => eventLatest(b) - eventLatest(a)).map((x) => '<option value="' + esc(x.id) + '"' + (x.id === g.eventId ? ' selected' : '') + '>' + esc(x.name) + '</option>').join('') +
+      '<option value="__new">New group…</option>';
     if (document.activeElement !== $('g-points')) $('g-points').value = g.summary || '';
     const ms = g.ids.map(meta).filter(Boolean).sort((a, b) => (a.created || 0) - (b.created || 0));
     const words = ms.reduce((n, m) => n + (m.words || 0), 0);
     $('g-meta').textContent = ms.length ? '· ' + plural(ms.length, 'recording', 'recordings') + ' · ' + words + ' words' : '';
     $('g-list').innerHTML = ms.length ? ms.map((m) => recRow(m, { remove: true })).join('') : '<li><p class="empty" style="padding:12px">None yet. Tap + Add recordings, or send segments here from the floating panel’s Session picker.</p></li>';
     $('g-gen').disabled = !ms.length;
-    $('g-delete').textContent = isSession ? 'Delete session…' : 'Delete group…';
+    $('g-delete').textContent = 'Delete session…';
   }
 
   async function saveSessionFields() {
     const g = groupById(viewId);
     if (!g) return;
-    if (g.eventId) K.updateSession(g, { time: $('g-time').value, title: $('g-title').value, speakers: $('g-speakers').value });
-    else { g.name = $('g-name').value.trim() || g.name; g.updated = Date.now(); }
+    K.updateSession(g, { time: $('g-time').value, title: $('g-title').value, speakers: $('g-speakers').value });
     await saveGroups();
     say('msg-g', 'Saved.');
   }
@@ -269,7 +300,7 @@
       const res = (await call('claude', { body: JSON.stringify(K.groupSummaryRequest(g.name, recs, opts(), context())) })).json;
       const t = g.title;
       K.applySummary(g, res);
-      if (g.eventId) g.title = t; // sessions keep their programme title
+      g.title = t; // sessions keep their own title
       g.updated = Date.now();
       await saveGroups();
       if (view === 'group' && viewId === g.id) $('g-points').value = g.summary;
@@ -312,16 +343,15 @@
   function renderAssign() {
     $('a-what').textContent = 'Assign ' + plural(assignIds.length, 'recording', 'recordings') + ' to:';
     const out = [];
-    const evs = data.events.slice().sort((a, b) => (b.created || 0) - (a.created || 0));
-    evs.forEach((e) => {
+    const loose = data.groups.filter((g) => !g.eventId).sort((a, b) => sessionLatest(b) - sessionLatest(a));
+    if (loose.length) out.push('<div class="assign-ev">Not in a group</div><div class="dest">' + loose.map((g) => '<button data-to="' + esc(g.id) + '">' + esc(g.name) + '</button>').join('') + '</div>');
+    data.events.slice().sort((a, b) => eventLatest(b) - eventLatest(a)).forEach((e) => {
       const ss = K.eventSessions(data, e.id);
       if (!ss.length) return;
       out.push('<div class="assign-ev">' + esc(e.name) + '</div><div class="dest">' +
-        ss.map((g) => '<button data-to="' + esc(g.id) + '">' + esc(g.name) + (g.speakers && g.speakers.length ? '<span class="m">' + esc(g.speakers.join(', ')) + '</span>' : '') + '</button>').join('') + '</div>');
+        ss.map((g) => '<button data-to="' + esc(g.id) + '">' + esc(g.name) + '</button>').join('') + '</div>');
     });
-    const plain = data.groups.filter((g) => !g.eventId).sort((a, b) => a.name.localeCompare(b.name));
-    if (plain.length) out.push('<div class="assign-ev">Groups</div><div class="dest">' + plain.map((g) => '<button data-to="' + esc(g.id) + '">' + esc(g.name) + '</button>').join('') + '</div>');
-    if (!out.length) out.push('<p class="empty">No sessions or groups yet. Make a new group below, or set up a symposium.</p>');
+    if (!out.length) out.push('<p class="empty">No sessions yet. Make a new session below.</p>');
     $('a-list').innerHTML = out.join('');
     $('a-newname').value = '';
     say('msg-a', '');
@@ -351,15 +381,15 @@
   // ---------------------------------------------------------------- Recording
 
   function groupSelectHtml(selected) {
+    const opt = (g) => '<option value="' + esc(g.id) + '"' + (g.id === selected ? ' selected' : '') + '>' + esc(g.name) + '</option>';
     const out = ['<option value="">Unsorted</option>'];
-    data.events.slice().sort((a, b) => (b.created || 0) - (a.created || 0)).forEach((e) => {
+    const loose = data.groups.filter((g) => !g.eventId).sort((a, b) => sessionLatest(b) - sessionLatest(a));
+    if (loose.length) out.push('<optgroup label="Not in a group">' + loose.map(opt).join('') + '</optgroup>');
+    data.events.slice().sort((a, b) => eventLatest(b) - eventLatest(a)).forEach((e) => {
       const ss = K.eventSessions(data, e.id);
-      if (!ss.length) return;
-      out.push('<optgroup label="' + esc(e.name) + '">' + ss.map((g) => '<option value="' + esc(g.id) + '"' + (g.id === selected ? ' selected' : '') + '>' + esc(g.name) + '</option>').join('') + '</optgroup>');
+      if (ss.length) out.push('<optgroup label="' + esc(e.name) + '">' + ss.map(opt).join('') + '</optgroup>');
     });
-    const plain = data.groups.filter((g) => !g.eventId);
-    if (plain.length) out.push('<optgroup label="Groups">' + plain.map((g) => '<option value="' + esc(g.id) + '"' + (g.id === selected ? ' selected' : '') + '>' + esc(g.name) + '</option>').join('') + '</optgroup>');
-    out.push('<option value="__new">New group…</option>');
+    out.push('<option value="__new">New session…</option>');
     return out.join('');
   }
 
@@ -402,11 +432,7 @@
     try {
       await call('save', { id: rec.id, json: JSON.stringify(rec) });
       let gid = $('d-group').value;
-      if (gid === '__new') {
-        const g = K.newGroup($('d-newgroup').value || 'Group ' + (data.groups.filter((x) => !x.eventId).length + 1));
-        data.groups.push(g);
-        gid = g.id;
-      }
+      if (gid === '__new') gid = K.newSession(data, { title: $('d-newgroup').value.trim() || 'New session' }).id;
       if (gid) K.assignToGroup(data, gid, [rec.id]); else K.removeFromGroups(data, [rec.id]);
       await saveGroups();
       if (toPrep) {
@@ -519,16 +545,16 @@
     await loadData();
     let eventId;
     if (list.length) {
-      const made = K.makeSessionGroups(data, { event: syData.event || 'Symposium', date: '', sessions: list });
+      const made = K.makeSessionGroups(data, { event: syData.event || 'Group', date: '', sessions: list });
       eventId = made[0].eventId;
-    } else eventId = K.newEvent(data, syData.event || 'Symposium').id;
+    } else eventId = K.newEvent(data, syData.event || 'Group').id;
     try {
       await saveGroups();
       resetSymp();
       stack.pop(); // leave New symposium; Back from the symposium goes to the Library
       stack.push({ v: 'library', id: null });
       show('event', eventId);
-      say('msg-e', 'Created. Pick a session in the floating panel while you record; its speakers become the chips.');
+      say('msg-e', 'Created. Pick a session in the floating panel while you record.');
     } catch (e) { say('msg-sy', 'Could not save: ' + errText(e)); }
   }
 
@@ -597,18 +623,16 @@
 
   // Library home
   $('b-newsymp').onclick = () => { resetSymp(); go('symp'); };
-  $('b-newgroup').onclick = () => { $('ng-box').hidden = false; $('ng-name').value = ''; $('ng-name').focus(); };
-  $('ng-cancel').onclick = () => { $('ng-box').hidden = true; };
-  $('ng-ok').onclick = async () => {
-    const g = K.newGroup($('ng-name').value || 'Group ' + (data.groups.filter((x) => !x.eventId).length + 1));
-    data.groups.push(g);
+  $('b-newsession').onclick = async () => {
+    const g = K.newSession(data, {});
     await saveGroups();
-    $('ng-box').hidden = true;
     go('group', g.id);
+    $('g-title').select();
   };
   $('lib-home').addEventListener('click', (e) => {
     const b = e.target.closest('button');
     if (!b) return;
+    if (b.dataset.toggle) { const sec = b.closest('.grp'); const shut = !sec.classList.contains('closed'); setFolded(b.dataset.toggle, shut); sec.classList.toggle('closed', shut); b.setAttribute('aria-expanded', String(!shut)); return; }
     if (b.dataset.nav === 'unsorted') { uSelecting = false; uPicked.clear(); go('unsorted'); }
     else if (b.dataset.event) go('event', b.dataset.event);
     else if (b.dataset.group) go('group', b.dataset.group);
@@ -649,15 +673,23 @@
   $('e-list').addEventListener('click', (e) => { const b = e.target.closest('button[data-group]'); if (b) go('group', b.dataset.group); });
   let eDelArmed = 0;
   $('e-delete').onclick = async () => {
-    if (Date.now() - eDelArmed > 4000) { eDelArmed = Date.now(); $('e-delete').textContent = 'Tap again to delete the symposium'; return; }
-    K.deleteEvent(data, viewId);
+    if (Date.now() - eDelArmed > 4000) { eDelArmed = Date.now(); $('e-delete').textContent = 'Tap again to delete the group'; return; }
+    K.dissolveEvent(data, viewId);
     await saveGroups();
     await back();
-    say('msg-lib', 'Symposium deleted. Its recordings are in Unsorted.');
+    say('msg-lib', 'Group deleted. Its sessions are under Sessions not in a group.');
   };
 
   // Session / group
-  ['g-time', 'g-title', 'g-speakers', 'g-name'].forEach((id) => $(id).addEventListener('change', saveSessionFields));
+  ['g-time', 'g-title', 'g-speakers'].forEach((id) => $(id).addEventListener('change', saveSessionFields));
+  $('g-groupsel').addEventListener('change', async () => {
+    let eid = $('g-groupsel').value;
+    if (eid === '__new') eid = K.newEvent(data, 'New group').id;
+    K.setSessionEvent(data, viewId, eid);
+    await saveGroups();
+    renderGroup();
+    say('msg-g', eid ? 'Moved to “' + eventById(eid).name + '”.' + ($('g-groupsel').value === eid && eventById(eid).name === 'New group' ? ' Rename it from the Library (Edit).' : '') : 'Taken out of its group.');
+  });
   $('g-points').addEventListener('change', async () => { const g = groupById(viewId); if (g) { g.summary = $('g-points').value.trim(); await saveGroups(); say('msg-g', 'Saved.'); } });
   $('g-addrecs').onclick = () => { pPicked.clear(); go('pick', viewId); };
   $('g-gen').onclick = groupKeyPoints;
@@ -689,8 +721,7 @@
   // Assign / pick
   $('a-list').addEventListener('click', (e) => { const b = e.target.closest('button[data-to]'); if (b) assignTo(b.dataset.to); });
   $('a-new').onclick = async () => {
-    const g = K.newGroup($('a-newname').value || 'Group ' + (data.groups.filter((x) => !x.eventId).length + 1));
-    data.groups.push(g);
+    const g = K.newSession(data, { title: $('a-newname').value.trim() || 'New session' });
     await saveGroups();
     assignTo(g.id);
   };

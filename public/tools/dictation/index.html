@@ -110,6 +110,9 @@ ol li{margin:0 0 4px}
 .chev{flex:none;font-size:1.4rem;font-weight:600;padding-left:8px}
 .inbox .rowbtn{min-height:72px}
 .inbox .t{font-size:1.1rem}
+.grp.closed .lib,.grp.closed .empty{display:none}
+.grp-h .open .t::before{content:"\25BE  "}
+.grp.closed .grp-h .open .t::before{content:"\25B8  "}
 .assign-ev{margin:16px 0 6px;font-weight:600;border-bottom:2px solid var(--ink);padding-bottom:3px}
 .dest{display:flex;flex-direction:column;gap:6px}
 .dest button{text-align:left;min-height:52px}
@@ -141,13 +144,8 @@ ol li{margin:0 0 4px}
 <!-- ============================== Library ============================== -->
 <section id="v-library" role="tabpanel" aria-labelledby="tab-library">
   <div class="libbar">
-    <button id="b-newsymp" class="primary">New symposium</button>
-    <button id="b-newgroup">New group</button>
-  </div>
-  <div class="chooser" id="ng-box" hidden>
-    <label for="ng-name"><b>New group</b></label>
-    <input type="text" id="ng-name" placeholder="Group name">
-    <div class="r"><button id="ng-cancel">Cancel</button><button id="ng-ok" class="primary">Create</button></div>
+    <button id="b-newsymp" class="primary">New group</button>
+    <button id="b-newsession">New session</button>
   </div>
   <div id="lib-home"></div>
   <p class="msg" id="msg-lib" role="status"></p>
@@ -172,7 +170,7 @@ ol li{margin:0 0 4px}
 <!-- ============================== Symposium ============================== -->
 <section id="v-event" hidden>
   <div class="group">
-    <label for="e-name" class="field"><b>Symposium name</b></label>
+    <label for="e-name" class="field"><b>Group name</b></label>
     <input type="text" id="e-name" style="width:100%">
     <span class="hint" id="e-meta"></span>
   </div>
@@ -182,8 +180,8 @@ ol li{margin:0 0 4px}
     <div class="btns"><button id="e-add" class="primary">+ Add session</button></div>
   </div>
   <div class="group">
-    <div class="btns"><button id="e-delete">Delete symposium…</button></div>
-    <span class="hint" style="margin-top:6px">Deleting keeps the recordings; they go back to Unsorted.</span>
+    <div class="btns"><button id="e-delete">Delete group…</button></div>
+    <span class="hint" style="margin-top:6px">Deleting keeps its sessions and recordings; the sessions move to Not in a group.</span>
     <p class="msg" id="msg-e" role="status"></p>
   </div>
 </section>
@@ -193,8 +191,8 @@ ol li{margin:0 0 4px}
   <p class="hint" id="a-what" style="margin:14px 0 4px"></p>
   <div id="a-list"></div>
   <div class="chooser" style="margin-top:16px">
-    <label for="a-newname"><b>Or a new group</b></label>
-    <div class="r"><input type="text" id="a-newname" placeholder="Group name"><button id="a-new">Create &amp; assign</button></div>
+    <label for="a-newname"><b>Or a new session</b></label>
+    <div class="r"><input type="text" id="a-newname" placeholder="Session name"><button id="a-new">Create &amp; assign</button></div>
   </div>
   <p class="msg" id="msg-a" role="status"></p>
 </section>
@@ -355,11 +353,11 @@ ol li{margin:0 0 4px}
       <input class="who" type="text" id="g-speakers" aria-label="Speakers" placeholder="Speakers, separated by commas">
     </div>
     <span class="hint" id="g-people" style="margin-top:4px" hidden></span>
-    <span class="hint" style="margin-top:4px">Names only, separated by commas. They become the chips in the floating panel when you pick this session.</span>
-  </div>
-  <div class="group" id="g-group-fields">
-    <label for="g-name" class="field"><b>Group name</b></label>
-    <input type="text" id="g-name" style="width:100%">
+    <span class="hint" style="margin-top:4px">Speakers: names only, separated by commas (for reference).</span>
+    <div class="row" style="margin-top:8px;border-top:0">
+      <label for="g-groupsel"><b>Group</b></label>
+      <select id="g-groupsel" style="flex:1"></select>
+    </div>
   </div>
   <div class="group">
     <h2>Recordings <span class="hint" style="display:inline" id="g-meta"></span></h2>
@@ -393,9 +391,9 @@ ol li{margin:0 0 4px}
     <input type="text" id="d-title">
     <span class="hint" id="d-meta"></span>
     <div class="row" style="margin-top:10px">
-      <label for="d-group"><b>Group</b></label>
+      <label for="d-group"><b>Session</b></label>
       <select id="d-group" style="flex:1"></select>
-      <input type="text" id="d-newgroup" placeholder="New group name" aria-label="New group name" hidden style="flex:1 1 100%">
+      <input type="text" id="d-newgroup" placeholder="New session name" aria-label="New session name" hidden style="flex:1 1 100%">
     </div>
   </div>
   <div class="group">

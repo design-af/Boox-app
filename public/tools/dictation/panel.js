@@ -229,10 +229,11 @@
       const items = sessionList().map((g) => {
         let head = '';
         if (g.eventId && g.event !== lastEv) { lastEv = g.event; head = '<div class="ev">' + esc(g.event) + '</div>'; }
-        else if (!g.eventId && lastEv !== '__plain') { lastEv = '__plain'; head = '<div class="ev">Groups</div>'; }
+        else if (!g.eventId && lastEv !== '__loose') { lastEv = '__loose'; head = '<div class="ev">Not in a group</div>'; }
         return head + '<button data-sess="' + esc(g.id) + '"' + (g.id === st.sessionId ? ' class="dark"' : '') + '>' + esc(g.name) + '</button>';
       }).join('');
       pop.innerHTML = '<div class="h"><b>Which session is this?</b> <span class="sm">Segments you send to Prep go into it.</span></div>' +
+        '<div class="r"><button data-act="newsession" class="dark">+ New session</button></div>' +
         '<div class="sesslist">' + items + '</div>' +
         '<div class="r"><button data-sess="">None</button><button data-act="sesscancel">Cancel</button></div>';
       pop.className = 'show';
@@ -282,7 +283,7 @@
       const w = p ? K.words(p.raw)[selWord.i] : '';
       pop.innerHTML = '<div class="h">“<b>' + esc(w || '') + '</b>”</div><div class="r">' +
         '<button data-act="delword">Delete word</button><button data-act="delphrase">Delete phrase</button>' +
-        '<button data-act="spkhere">New speaker here</button><button data-act="close">Close</button></div>';
+        (K.SPEAKERS ? '<button data-act="spkhere">New speaker here</button>' : '') + '<button data-act="close">Close</button></div>';
       pop.className = 'show';
     } else { pop.className = ''; pop.innerHTML = ''; }
   }
@@ -294,7 +295,7 @@
     $('t-prep').textContent = 'Prep' + (prep ? (prep.flags.length ? ' (' + prep.flags.length + ' ?)' : ' ✓') : '');
     $('confirm-clear').hidden = !confirmClear || tab !== 'live';
     $('act-live').hidden = tab !== 'live' || confirmClear || !!splitSel;
-    $('sess-row').hidden = tab !== 'live' || !groupsData.groups.length;
+    $('sess-row').hidden = tab !== 'live';
     const sg = sessionGroup();
     $('sess').textContent = 'Session: ' + (sg ? sg.name : 'none') + ' ▾';
     renderSpeakerRow();
@@ -336,17 +337,32 @@
 
   /** Sessions in programme order (events first), then other groups by name. */
   function sessionList() {
-    const ev = groupsData.groups.filter((g) => g.eventId).sort((a, b) => (b.created || 0) - (a.created || 0) || (a.order || 0) - (b.order || 0));
+    const latest = (g) => Math.max(g.created || 0, g.updated || 0);
+    const out = groupsData.groups.filter((g) => !g.eventId).sort((a, b) => latest(b) - latest(a));
     const byEvent = new Map();
-    ev.forEach((g) => { if (!byEvent.has(g.eventId)) byEvent.set(g.eventId, []); byEvent.get(g.eventId).push(g); });
-    const out = [];
-    byEvent.forEach((list) => list.sort((a, b) => (a.order || 0) - (b.order || 0)).forEach((g) => out.push(g)));
-    groupsData.groups.filter((g) => !g.eventId).sort((a, b) => a.name.localeCompare(b.name)).forEach((g) => out.push(g));
+    groupsData.groups.filter((g) => g.eventId).forEach((g) => { if (!byEvent.has(g.eventId)) byEvent.set(g.eventId, []); byEvent.get(g.eventId).push(g); });
+    Array.from(byEvent.values())
+      .sort((a, b) => Math.max(...b.map(latest)) - Math.max(...a.map(latest)))
+      .forEach((list) => list.sort((a, b) => (a.order || 0) - (b.order || 0)).forEach((g) => out.push(g)));
     return out;
+  }
+
+  /** + New session from the panel: a blank session, written to now, put in a group later. */
+  function newSessionFromPanel() {
+    loadGroups();
+    const now = new Date();
+    const g = K.newSession(groupsData, { time: now.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }), title: 'New session' });
+    if (N.saveGroups) N.saveGroups(JSON.stringify(groupsData));
+    st.sessionId = g.id;
+    saveState();
+    sessPick = false;
+    msg('Writing to \u201C' + g.name + '\u201D. Rename it or put it in a group in the app.');
+    renderAll();
   }
 
   function renderSpeakerRow() {
     const row = $('spk-row');
+    if (!K.SPEAKERS) { row.hidden = true; return; }
     row.hidden = tab !== 'live' || confirmClear || !!splitSel;
     if (row.hidden) return;
     const cur = liveCurrent();
@@ -359,7 +375,7 @@
   /** The letter on the floating button: the current speaker once there is more than one. */
   function updateBadge() {
     const cur = liveCurrent();
-    const b = cur === '?' || liveSpeakers().length > 1 ? (cur === '?' ? '?' : cur) : '';
+    const b = !K.SPEAKERS ? '' : cur === '?' || liveSpeakers().length > 1 ? (cur === '?' ? '?' : cur) : '';
     if (b !== badgeShown) { badgeShown = b; if (N.setBadge) N.setBadge(b); }
   }
 
@@ -408,7 +424,7 @@
         st.liveId = live.id;
         saveState();
         declaredEarly.splice(0).forEach((id) => K.declareSpeaker(live, id));
-        K.applySessionSpeakers(live, sessionSpeakerNames());
+        if (K.SPEAKERS) K.applySessionSpeakers(live, sessionSpeakerNames());
       }
       K.addPhrase(live, h, pending);
       pending = { end: null, br: false };
@@ -420,6 +436,7 @@
       if (tab === 'live') renderContent();
     },
     onSpeakerMark() {
+      if (!K.SPEAKERS) return;
       // Double-tap on the floating button: a new turn, speaker unknown (sorted out in Prep).
       pending.spk = '?';
       updateBadge();
@@ -643,7 +660,7 @@
       saveState();
       sessPick = false;
       // The session's speakers name the chips (and the text being recorded now).
-      if (live && sessionSpeakerNames().length) { K.applySessionSpeakers(live, sessionSpeakerNames()); save(live); }
+      if (K.SPEAKERS && live && sessionSpeakerNames().length) { K.applySessionSpeakers(live, sessionSpeakerNames()); save(live); }
       updateBadge();
       const sg = sessionGroup();
       msg(sg ? 'Segments you send to Prep go into “' + sg.name + '”.' : 'No session: segments are not grouped.');
@@ -651,6 +668,7 @@
       return;
     }
     if (act === 'sesscancel') { sessPick = false; renderAll(); return; }
+    if (act === 'newsession') { newSessionFromPanel(); return; }
     if (b && b.dataset.split && splitSel && rec) {
       snapshot(tab === 'live' ? 'live' : 'prep');
       let id = b.dataset.split;
@@ -738,6 +756,7 @@
   $('clear-yes').onclick = () => { confirmClear = false; clearLive(); };
   $('check').onclick = check;
   $('speakers').onclick = speakersCheck;
+  if (!K.SPEAKERS) $('speakers').hidden = true;
   $('sess').onclick = () => { loadGroups(); sessPick = !sessPick; splitSel = null; renderAll(); };
   $('spk-row').addEventListener('click', (e) => {
     const b = e.target.closest('button[data-chip]');
@@ -762,7 +781,7 @@
       return;
     }
     const w = e.target.closest('.w');
-    if (w && tab === 'live' && live) {
+    if (K.SPEAKERS && w && tab === 'live' && live) {
       // Tap a word in Live: a new speaker can start there.
       splitSel = { p: Number(w.dataset.p), i: Number(w.dataset.i) };
       renderAll();

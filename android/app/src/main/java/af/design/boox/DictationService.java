@@ -78,6 +78,8 @@ public class DictationService extends Service {
     private static final int NOTE_ID = 4711;
 
     static volatile DictationService instance;
+    /** Speaker marking is switched off for now (see kbcore.js SPEAKERS). */
+    static final boolean SPEAKER_DOUBLE_TAP = false;
 
     private final Handler main = new Handler(Looper.getMainLooper());
     private WindowManager wm;
@@ -473,8 +475,11 @@ public class DictationService extends Service {
                             prefs().edit().putInt("bubbleX", bubbleLp.x).putInt("bubbleY", bubbleLp.y).apply();
                         } else if (!longFired) {
                             // Double-tap = a new speaker started (speaker unknown); single tap = panel.
+                            // Speaker marking is off for now, so a tap opens the panel straight away.
                             long now = SystemClock.uptimeMillis();
-                            if (now - lastTapAt < 320) {
+                            if (!SPEAKER_DOUBLE_TAP) {
+                                setPanelOpen(!panelOpen);
+                            } else if (now - lastTapAt < 320) {
                                 lastTapAt = 0;
                                 main.removeCallbacks(singleTap);
                                 onBubbleDoubleTap();

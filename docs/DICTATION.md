@@ -93,3 +93,16 @@ Flow: **Live → Prep → Push**, every recording kept in a **Library**.
   doesn't kick in; off = partial wake lock only. Speech-engine error 9 (insufficient permissions)
   while recording is treated as the tablet sleeping: retry every ~3 s and restart on wake; only a
   really missing mic permission stops recording.
+- Build 36 — sessions and groups:
+  - Speaker marking is switched off (`K.SPEAKERS = false`, `SPEAKER_DOUBLE_TAP = false`): no
+    chips, labels, speaker flags or Speakers button; a single tap on the bubble opens the panel.
+    The code stays in place behind those flags. Session speakers are kept as a reference field.
+  - Panel Session picker has "+ New session": a blank session named by the time
+    (`K.newSession`), unassigned, which Prep ▸ segments go into. Sessions not in a group are
+    listed newest first, then each group's sessions.
+  - "Symposium" is now "Group" in the UI (stored as `events`). Library home: Unsorted, then
+    Groups sorted by latest activity, each collapsible (folded state in localStorage
+    `aside.folded`) with an Edit button, then "Sessions not in a group", newest first.
+    New group / New session buttons. A session page has a Group picker (`K.setSessionEvent`;
+    "New group…" makes one). Deleting a group keeps its sessions (`K.dissolveEvent`).
+    Assign to… and the recording page offer sessions; "new" there makes a session.
