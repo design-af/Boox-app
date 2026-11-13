@@ -442,7 +442,13 @@
       if (result === 'pasted' || result === 'set') {
         prep.pushed = Date.now();
         save(prep);
-        msg('Pushed into the field ✓');
+        // Pushed: Prep empties for the next segment. The recording stays in the Library; Undo brings it back.
+        snapshot('state');
+        prep = null;
+        st.prepId = null;
+        saveState();
+        flagIdx = -1; selWord = null; splitSel = null; renameSpk = null; prepView = 'text';
+        msg('Pushed into the field ✓ Prep is clear (Undo brings it back; it is also in the Library).');
         renderAll();
       } else if (result.indexOf('noservice') === 0) {
         msg('Copied — long-press the field and Paste. (Turn on Aside Transcribe in Accessibility to push directly.)', true);
