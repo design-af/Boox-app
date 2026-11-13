@@ -83,6 +83,7 @@ public class DictationPlugin extends Plugin {
         JSObject s = new JSObject();
         s.put("engine", p.getString("engine", "auto"));
         s.put("mute", p.getBoolean("mute", true));
+        s.put("keepAwake", p.getBoolean("keepAwake", true));
         s.put("cap", p.getBoolean("cap", true));
         s.put("autoPeriod", p.getBoolean("autoPeriod", true));
         s.put("lang", p.getString("lang", ""));
@@ -161,7 +162,7 @@ public class DictationPlugin extends Plugin {
             String v = call.getString(k);
             if (v != null) e.putString(k, v.trim());
         }
-        String[] bools = { "mute", "cap", "autoPeriod" };
+        String[] bools = { "mute", "cap", "autoPeriod", "keepAwake" };
         for (String k : bools) {
             Boolean v = call.getBoolean(k);
             if (v != null) e.putBoolean(k, v);

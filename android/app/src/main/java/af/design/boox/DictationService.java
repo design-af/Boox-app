@@ -114,6 +114,7 @@ public class DictationService extends Service {
     private final Runnable restartRunnable = () -> { if (running) { createRecognizer(); listen(); } };
     private long lastEngineEvent;     // last sign of life from the speech engine
     private PowerManager.WakeLock wakeLock;
+    private boolean wakeLockKeepsScreen;
     private BroadcastReceiver screenReceiver;
     /** Every 5 s while recording: a speech engine that has gone silent (e.g. after the tablet slept) is restarted. */
     private final Runnable watchdog = new Runnable() {
@@ -704,12 +705,19 @@ public class DictationService extends Service {
     /** Keeps the processor running while recording, so transcription can carry on with the screen off. */
     private void acquireWake() {
         try {
+            boolean keepAwake = prefs().getBoolean("keepAwake", true);
+            if (wakeLock != null && wakeLockKeepsScreen != keepAwake) { releaseWake(); wakeLock = null; }
             if (wakeLock == null) {
                 PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
-                wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "AsideTranscribe:recording");
+                // Screen lock: the tablet doesn't sleep or show its screensaver while recording.
+                // (Deprecated flag, still honoured; the window flag alone is ignored by the Boox screensaver.)
+                @SuppressWarnings("deprecation")
+                int level = keepAwake ? PowerManager.SCREEN_DIM_WAKE_LOCK : PowerManager.PARTIAL_WAKE_LOCK;
+                wakeLock = pm.newWakeLock(level, "AsideTranscribe:recording");
                 wakeLock.setReferenceCounted(false);
+                wakeLockKeepsScreen = keepAwake;
             }
-            wakeLock.acquire(4L * 60 * 60 * 1000);
+            wakeLock.acquire(6L * 60 * 60 * 1000);
         } catch (Exception ignored) { }
     }
 
@@ -884,7 +892,12 @@ public class DictationService extends Service {
                     retry(100, false);
                     break;
                 case 9: // INSUFFICIENT_PERMISSIONS
-                    stopRec("Microphone not allowed — open AFS Custom Boox → Dictation");
+                    // The speech engine refuses the microphone while the tablet sleeps (screensaver).
+                    // Only a real missing permission stops recording; otherwise wait and retry, and
+                    // the screen-on handler restarts it as soon as the tablet wakes.
+                    if (!hasMic()) { stopRec("Microphone not allowed - open AFS Custom Boox, Aside Transcribe, Setup"); break; }
+                    state("Paused while the tablet sleeps - resumes when it wakes");
+                    retry(3000, true);
                     break;
                 case 12: // LANGUAGE_NOT_SUPPORTED
                 case 13: // LANGUAGE_UNAVAILABLE

@@ -561,6 +561,7 @@
       const t = s.settings;
       $('engine').value = t.engine || 'auto';
       $('mute').checked = t.mute !== false;
+      $('keepAwake').checked = t.keepAwake !== false;
       $('cap').checked = t.cap !== false;
       $('autoPeriod').checked = t.autoPeriod !== false;
       $('lang').value = t.lang || '';
@@ -576,7 +577,7 @@
   async function saveSettings(extra) {
     try {
       renderStatus(await call('setSettings', Object.assign({
-        engine: $('engine').value, mute: $('mute').checked, cap: $('cap').checked, autoPeriod: $('autoPeriod').checked,
+        engine: $('engine').value, mute: $('mute').checked, keepAwake: $('keepAwake').checked, cap: $('cap').checked, autoPeriod: $('autoPeriod').checked,
         lang: $('lang').value.trim(), model: $('model').value, context: $('context').value,
       }, extra || {})));
       say('msg-set', 'Saved.');
@@ -787,7 +788,7 @@
   $('b-acc').onclick = () => call('openAccessibilitySettings').catch((e) => say('msg-setup', errText(e)));
 
   // Settings
-  ['engine', 'mute', 'cap', 'autoPeriod', 'model', 'lang', 'context'].forEach((id) => $(id).addEventListener('change', () => saveSettings()));
+  ['engine', 'mute', 'keepAwake', 'cap', 'autoPeriod', 'model', 'lang', 'context'].forEach((id) => $(id).addEventListener('change', () => saveSettings()));
   $('apiKey').addEventListener('change', () => {
     const v = $('apiKey').value.trim();
     if (!v) return;

@@ -88,3 +88,8 @@ Flow: **Live → Prep → Push**, every recording kept in a **Library**.
     also keeps `events` (`ensureEvents`, `renameEvent`, `addSession`, `updateSession`,
     `deleteGroup`, `deleteEvent`, `unsortedIds`). Recording page's group picker is grouped by
     symposium.
+- Build 35: "Keep the tablet awake while recording" (pref `keepAwake`, default on) holds a
+  screen wake lock (SCREEN_DIM, deprecated but honoured) while recording, so the Boox screensaver
+  doesn't kick in; off = partial wake lock only. Speech-engine error 9 (insufficient permissions)
+  while recording is treated as the tablet sleeping: retry every ~3 s and restart on wake; only a
+  really missing mic permission stops recording.
