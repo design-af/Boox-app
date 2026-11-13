@@ -312,13 +312,61 @@
     return rec.summary;
   }
 
+  // ---------------------------------------------------------------- groups
+  // groups.json: { groups: [{ id, name, created, updated, ids: [recordingId], summary, title }] }
+  // A recording is in at most one group.
+
+  function newGroup(name, now) {
+    now = now || Date.now();
+    return { id: 'g' + now.toString(36) + Math.floor(Math.random() * 1296).toString(36).padStart(2, '0'),
+      name: String(name || '').trim() || 'New group', created: now, updated: now, ids: [], summary: '', title: '' };
+  }
+
+  /** Moves recordings into a group (taking them out of any other). */
+  function assignToGroup(data, groupId, ids) {
+    for (const g of data.groups) {
+      g.ids = g.ids.filter((id) => !ids.includes(id));
+      if (g.id === groupId) { g.ids = g.ids.concat(ids); g.updated = Date.now(); }
+    }
+    return data;
+  }
+
+  function removeFromGroups(data, ids) {
+    for (const g of data.groups) {
+      const before = g.ids.length;
+      g.ids = g.ids.filter((id) => !ids.includes(id));
+      if (g.ids.length !== before) g.updated = Date.now();
+    }
+    return data;
+  }
+
+  const groupOf = (data, id) => data.groups.find((g) => g.ids.includes(id)) || null;
+
+  /** Key points across several recordings (in time order), e.g. a conference day or one talk. */
+  function groupSummaryRequest(name, recs, opts, ctx) {
+    const parts = recs.slice().sort((a, b) => (a.created || 0) - (b.created || 0)).map((r, i) =>
+      '--- Segment ' + (i + 1) + ': ' + titleOf(r) + ' ---\n' + renderFixedAware(r, opts));
+    return {
+      max_tokens: 3000,
+      system: 'You write concise notes from transcripts of talks. The transcripts came from live speech recognition, so some words may be misheard: infer the intended meaning and never repeat obvious recognition errors.',
+      messages: [{
+        role: 'user',
+        content: contextBlock(ctx) + 'These ' + recs.length + ' transcript segments belong together (the listener grouped them as \u201C' + name + '\u201D):\n\n' + parts.join('\n\n') +
+          '\n\nReply in plain text, no markdown. First line: "Title: " and a title of at most 8 words. Then the key points across all segments as 6 to 15 short lines, each starting with "- ", grouped by theme rather than by segment. Include specific names, tools, numbers and recommendations mentioned. If there are clear action items or things to look up, end with a line "Follow up:" and more "- " lines.',
+      }],
+    };
+  }
+
+  const groupKeyPointsText = (g) => 'Key points \u2014 ' + (g.name || g.title) + '\n' + (g.summary || '').trim();
+
   const keyPointsText = (rec) => 'Key points — ' + titleOf(rec) + '\n' + (rec.summary || '').trim();
 
   const api = {
     words, norm, newRecording, defaultTitle, titleOf, render, plain: renderFixedAware, wordCount,
     phraseById, addPhrase, altFlags, findRange, localCheck, addFlag, sortFlags, replaceWords, applyFlag,
     keepFlag, deletePhrase, deleteLastWord, setEditedText, auditRequest, applyAudit, summaryRequest,
-    applySummary, keyPointsText,
+    applySummary, keyPointsText, newGroup, assignToGroup, removeFromGroups, groupOf, groupSummaryRequest,
+    groupKeyPointsText,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.KBCore = api;

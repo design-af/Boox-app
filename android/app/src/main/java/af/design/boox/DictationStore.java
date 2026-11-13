@@ -16,6 +16,7 @@ import java.nio.charset.StandardCharsets;
  * (DictationPlugin). Everything lives in the app's private files/dictation/ folder:
  *   recordings/<id>.json  one recording each (format in public/tools/dictation/kbcore.js)
  *   state.json            { liveId, prepId }
+ *   groups.json           { groups: [{ id, name, ids: [recordingId], summary, ... }] }
  *   transcript.txt        plain backup of every phrase heard
  */
 final class DictationStore {
@@ -97,6 +98,15 @@ final class DictationStore {
 
     static boolean saveState(Context c, String json) {
         return write(new File(base(c), "state.json"), json == null ? "{}" : json);
+    }
+
+    static String loadGroups(Context c) {
+        String s = read(new File(base(c), "groups.json"));
+        return s == null ? "{\"groups\":[]}" : s;
+    }
+
+    static boolean saveGroups(Context c, String json) {
+        return write(new File(base(c), "groups.json"), json == null ? "{\"groups\":[]}" : json);
     }
 
     /** Library metadata, newest first is left to the page. */

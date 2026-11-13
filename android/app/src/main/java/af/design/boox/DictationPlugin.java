@@ -31,6 +31,7 @@ import java.io.File;
  *   status | requestMic | openOverlaySettings | openAccessibilitySettings | openAppSettings
  *   showBubble | hideBubble | setSettings {engine, mute, cap, autoPeriod, lang, model, context, apiKey}
  *   list | load {id} | save {id, json} | remove {id} | state | setState {json} | claude {body}
+ *   groups | saveGroups {json}
  *   transcript | copyText {text} | shareText {text, subject} | clearTranscript
  */
 @CapacitorPlugin(
@@ -212,6 +213,19 @@ public class DictationPlugin extends Plugin {
     public void setState(PluginCall call) {
         DictationStore.saveState(getContext(), call.getString("json", "{}"));
         call.resolve();
+    }
+
+    @PluginMethod
+    public void groups(PluginCall call) {
+        JSObject r = new JSObject();
+        r.put("json", DictationStore.loadGroups(getContext()));
+        call.resolve(r);
+    }
+
+    @PluginMethod
+    public void saveGroups(PluginCall call) {
+        if (DictationStore.saveGroups(getContext(), call.getString("json"))) call.resolve();
+        else call.reject("Could not save groups");
     }
 
     @PluginMethod

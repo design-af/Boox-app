@@ -16,7 +16,7 @@
   let tab = 'live', prepView = 'text';
   let partial = '', running = false, panelOpen = true, partialTimer = 0, lastPartialDraw = 0;
   let pending = { end: null, br: false };
-  let flagIdx = -1, selWord = null, busy = false;
+  let flagIdx = -1, selWord = null, busy = false, confirmClear = false;
   const undo = [];
   const calls = {};
   let callSeq = 0;
@@ -176,25 +176,7 @@
         const cur = c.querySelector('.cur');
         if (cur) cur.scrollIntoView({ block: 'center' });
       }
-    } else {
-      renderLibrary();
     }
-  }
-
-  function renderLibrary() {
-    let items = [];
-    try { items = JSON.parse(N.list() || '[]'); } catch (e) { }
-    items.sort((a, b) => (b.updated || 0) - (a.updated || 0));
-    if (!items.length) { $('content').innerHTML = '<p class="empty">No recordings yet.</p>'; return; }
-    $('content').innerHTML = '<ul class="lib">' + items.map((m) => {
-      const where = m.id === st.liveId ? 'LIVE · ' : m.id === st.prepId ? 'IN PREP · ' : '';
-      const d = new Date(m.created || m.updated);
-      const when = d.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' }) + ' ' + d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
-      const bits = [when, m.words + ' words'];
-      if (m.hasSummary) bits.push('key points');
-      if (m.pushed) bits.push('pushed ✓');
-      return '<li data-id="' + esc(m.id) + '"><span class="t">' + esc(m.title || K.defaultTitle({ created: m.created })) + '</span><span class="m">' + where + bits.join(' · ') + '</span></li>';
-    }).join('') + '</ul>';
   }
 
   // Partial words are redrawn at most about once a second: every redraw is an e-ink refresh.
@@ -241,12 +223,11 @@
   function renderChrome() {
     $('t-live').className = tab === 'live' ? 'on' : '';
     $('t-prep').className = tab === 'prep' ? 'on' : '';
-    $('t-lib').className = tab === 'library' ? 'on' : '';
     $('t-live').textContent = 'Live' + (live && live.phrases.length ? ' (' + K.wordCount(live) + ')' : '');
     $('t-prep').textContent = 'Prep' + (prep ? (prep.flags.length ? ' (' + prep.flags.length + ' ?)' : ' ✓') : '');
-    $('act-live').hidden = tab !== 'live';
+    $('confirm-clear').hidden = !confirmClear || tab !== 'live';
+    $('act-live').hidden = tab !== 'live' || confirmClear;
     $('act-prep').hidden = tab !== 'prep';
-    $('act-lib').hidden = tab !== 'library';
     $('view').textContent = prepView === 'points' ? 'Text' : 'Points';
     $('push').innerHTML = prepView === 'points' ? 'Push pts &#9656;' : 'Push &#9656;';
     $('start').innerHTML = running ? '&#9632; Stop' : '&#9679; Start';
@@ -332,6 +313,7 @@
 
   function setTab(t) {
     tab = t;
+    confirmClear = false;
     selWord = null;
     if (t !== 'prep') flagIdx = -1;
     renderAll();
@@ -346,7 +328,7 @@
     if (!running) { moveToPrep(); return; }
     cutting = true;
     $('move').disabled = true;
-    msg('Finishing the sentence\u2026', true);
+    msg('Waiting for the sentence to end\u2026', true);
     N.cut();
     cutTimer = setTimeout(() => KB.onCut(), 6000);
   }
@@ -468,18 +450,6 @@
     N.push(text);
   }
 
-  function openFromLibrary(id) {
-    if (id === st.liveId) { setTab('live'); return; }
-    const rec = load(id);
-    if (!rec) { msg('Could not open that recording'); return; }
-    snapshot('state');
-    prep = rec;
-    st.prepId = id;
-    saveState();
-    prepView = 'text'; flagIdx = -1; selWord = null;
-    setTab('prep');
-  }
-
   function popAction(act, suggIdx) {
     if (!prep) return;
     const f = flagIdx >= 0 ? prep.flags[flagIdx] : null;
@@ -531,29 +501,23 @@
 
   $('t-live').onclick = () => setTab('live');
   $('t-prep').onclick = () => setTab('prep');
-  $('t-lib').onclick = () => setTab('library');
   $('start').onclick = () => (running ? N.stop() : N.start());
   $('min').onclick = () => N.collapse();
   $('move').onclick = prepClick;
-  $('clear').onclick = clearLive;
+  $('clear').onclick = () => {
+    if (!live || !live.phrases.length) { msg('Live is already empty'); return; }
+    confirmClear = true;
+    renderChrome();
+  };
+  $('clear-no').onclick = () => { confirmClear = false; renderChrome(); };
+  $('clear-yes').onclick = () => { confirmClear = false; clearLive(); };
   $('check').onclick = check;
   $('points').onclick = keyPoints;
   $('view').onclick = () => { prepView = prepView === 'points' ? 'text' : 'points'; flagIdx = -1; selWord = null; renderAll(); };
   $('edit').onclick = () => { if (prep) N.openApp('tools/dictation/index.html#rec=' + prep.id); };
   $('push').onclick = push;
   document.querySelectorAll('.undo').forEach((b) => { b.onclick = doUndo; });
-  $('lib-refresh').onclick = () => renderContent();
-  $('lib-app').onclick = () => N.openApp('tools/dictation/index.html#library');
-  let quitArmed = 0;
-  $('quit').onclick = () => {
-    if (running) { msg('Stop recording first'); return; }
-    if (Date.now() - quitArmed < 4000) { flushLive(); N.quit(); return; }
-    quitArmed = Date.now();
-    msg('Tap Close button again to remove the floating button');
-  };
   $('content').addEventListener('click', (e) => {
-    const li = e.target.closest('li[data-id]');
-    if (li) { openFromLibrary(li.dataset.id); return; }
     const w = e.target.closest('.w');
     if (!w || tab !== 'prep' || prepView !== 'text' || !prep) return;
     const p = Number(w.dataset.p), i = Number(w.dataset.i);

@@ -21,44 +21,85 @@ button{min-height:52px;padding:0 16px;border:2px solid var(--ink);background:var
 button:active{background:var(--ink);color:var(--paper)}
 button:disabled{opacity:.45}
 .primary{background:var(--ink);color:var(--paper)}
-.top{flex:none;display:flex;align-items:center;gap:12px;border-bottom:3px solid var(--ink);
-  padding:max(8px,env(safe-area-inset-top)) 12px 8px}
+
+.top{flex:none;display:flex;align-items:center;gap:12px;padding:max(8px,env(safe-area-inset-top)) 12px 8px}
 .top h1{flex:1;margin:0;font-size:1.3rem}
+.back{display:inline-flex;align-items:center;min-height:52px;padding:0 14px;border:2px solid var(--ink);text-decoration:none;font-weight:600;color:inherit;background:var(--paper)}
 .logo{flex:none;width:44px;height:44px;border-radius:8px;background:var(--ink);color:var(--paper);display:flex;align-items:center;justify-content:center}
 .logo svg{width:90%;height:90%;display:block}
-.back{display:inline-flex;align-items:center;min-height:52px;padding:0 14px;border:2px solid var(--ink);text-decoration:none;font-weight:600;color:inherit;background:var(--paper)}
+
+.tabs{flex:none;display:flex;border-top:3px solid var(--ink);border-bottom:3px solid var(--ink)}
+.tabs button{flex:1;border:0;border-left:2px solid var(--ink);min-height:56px;font-size:1.05rem}
+.tabs button:first-child{border-left:0}
+.tabs button[aria-selected="true"]{background:var(--ink);color:var(--paper)}
+.subhead{flex:none;border-bottom:3px solid var(--ink)}
+
 .middle{flex:1;min-height:0;overflow-y:auto;padding:0 16px 32px}
 .wrap{max-width:860px;margin:0 auto}
-.group{border-bottom:2px solid var(--ink);padding:18px 0}
+.group{border-bottom:2px solid var(--ink);padding:16px 0}
 .group:last-child{border-bottom:0}
-h2{margin:0 0 12px;font-size:1.05rem;letter-spacing:.06em;text-transform:uppercase}
-.step{display:flex;align-items:center;gap:12px;padding:10px 0;border-top:1px solid var(--ink)}
+h2{margin:0 0 10px;font-size:1rem;letter-spacing:.06em;text-transform:uppercase}
+.hint{display:block;font-size:.82rem;color:var(--muted)}
+.msg{font-size:.85rem;margin:8px 0 0}
+.msg:empty{display:none}
+.warn{border:2px solid var(--ink);padding:10px 12px;margin:0 0 12px}
+.btns{display:flex;gap:10px;flex-wrap:wrap;margin-top:10px}
+.btns button{flex:1 1 auto}
+textarea{width:100%;border:2px solid var(--ink);padding:10px;border-radius:0;background:var(--paper);resize:vertical}
+select,input[type=text],input[type=password]{min-height:52px;border:2px solid var(--ink);padding:0 10px;background:var(--paper);border-radius:0}
+input[type=checkbox]{width:32px;height:32px;accent-color:#000}
+
+/* Setup */
+.big{width:100%;min-height:64px;font-size:1.1rem}
+.step{display:flex;align-items:center;gap:12px;padding:8px 0;border-top:1px solid var(--ink)}
 .step:first-of-type{border-top:0}
 .mark{flex:none;width:40px;height:40px;border:2px solid var(--ink);display:flex;align-items:center;justify-content:center;font-weight:600;font-size:1.2rem}
 .step.done .mark{background:var(--ink);color:var(--paper)}
 .step .txt{flex:1;min-width:0}
 .step .txt b{display:block}
-.hint{display:block;font-size:.82rem;color:var(--muted)}
 .step button{flex:none}
-ol{margin:0;padding-left:1.3em}
-ol li{margin:0 0 6px}
-textarea{width:100%;border:2px solid var(--ink);padding:10px;border-radius:0;background:var(--paper);resize:vertical}
-.row{display:flex;align-items:center;gap:12px;margin:0 0 14px;flex-wrap:wrap}
-.row label{flex:1;min-width:12em}
-select,input[type=text],input[type=password]{min-height:52px;border:2px solid var(--ink);padding:0 10px;background:var(--paper);border-radius:0}
-input[type=checkbox]{width:32px;height:32px;accent-color:#000}
-.btns{display:flex;gap:10px;flex-wrap:wrap;margin-top:10px}
-.msg{min-height:1.4em;font-size:.85rem;margin:8px 0 0}
-.warn{border:2px solid var(--ink);padding:10px 12px;margin:0 0 12px}
-.big{width:100%;min-height:64px;font-size:1.1rem}
+ol{margin:0;padding-left:1.3em;font-size:.92rem}
+ol li{margin:0 0 4px}
+
+/* Settings: one setting per row, label left, control right */
+.row{display:flex;align-items:center;gap:12px;padding:6px 0;border-top:1px solid var(--ink);flex-wrap:wrap}
+.group h2 + .row{border-top:0}
+.row label{flex:1;min-width:10em}
+.row label .hint{display:inline}
+.row select,.row input[type=text],.row input[type=password]{flex:0 1 18em;min-height:48px}
+#context{min-height:0;height:4.2em}
+
+/* Library */
+.libbar{display:flex;gap:10px;align-items:center;padding:12px 0;flex-wrap:wrap}
+.libbar button{flex:1 1 auto}
+.libbar .count{flex:2 1 auto;font-weight:600}
+.chooser{border:3px solid var(--ink);padding:12px;margin:0 0 12px;display:flex;flex-direction:column;gap:10px}
+.chooser .r{display:flex;gap:10px;flex-wrap:wrap}
+.chooser select,.chooser input{flex:1 1 12em}
+.grp{border:3px solid var(--ink);margin:0 0 16px}
+.grp-h{display:flex;align-items:stretch;background:var(--ink);color:var(--paper)}
+.grp-h .open{flex:1;min-width:0;text-align:left;border:0;background:var(--ink);color:var(--paper);padding:10px 12px;min-height:60px}
+.grp-h .kp{flex:none;border:0;border-left:2px solid var(--paper);background:var(--ink);color:var(--paper)}
+.grp-h .open:active,.grp-h .kp:active{background:var(--paper);color:var(--ink)}
+.t{display:block;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.m{display:block;font-size:.8rem;font-weight:400}
+.day{margin:20px 0 6px;font-size:.85rem;font-weight:600;letter-spacing:.08em;text-transform:uppercase;border-bottom:2px solid var(--ink);padding-bottom:4px}
 .lib{list-style:none;margin:0;padding:0}
-.lib li{border:2px solid var(--ink);margin:0 0 8px;padding:10px 12px}
-.lib li:active{background:var(--ink);color:var(--paper)}
-.lib .t{font-weight:600;display:block}
-.lib .m{font-size:.82rem}
-#d-text{min-height:16em;font-size:.95rem}
-#d-points{min-height:8em;font-size:.95rem}
-#d-title{width:100%}
+.lib li{border-top:2px solid var(--ink);display:flex}
+.lib li:first-child{border-top:0}
+.day + .lib{border:2px solid var(--ink)}
+.rowbtn{flex:1;min-width:0;display:flex;align-items:center;gap:12px;text-align:left;border:0;padding:8px 12px;min-height:60px;font-weight:400}
+.rowbtn .meta{flex:1;min-width:0}
+.box{flex:none;width:30px;height:30px;border:3px solid var(--ink);display:flex;align-items:center;justify-content:center;font-weight:700}
+.picked .box{background:var(--ink);color:var(--paper)}
+.side{flex:none;border:0;border-left:2px solid var(--ink)}
+.empty{color:var(--muted);font-size:.92rem;padding:20px 0}
+
+/* Detail views */
+.field{display:block;margin:0 0 6px}
+#d-text{min-height:14em;font-size:.95rem}
+#d-points,#g-points{min-height:8em;font-size:.95rem}
+#d-title,#g-name{width:100%;margin-top:6px}
 </style>
 </head>
 <body>
@@ -67,23 +108,56 @@ input[type=checkbox]{width:32px;height:32px;accent-color:#000}
   <span class="logo" aria-hidden="true"><svg viewBox="0 0 100 100" aria-hidden="true"><path fill="currentColor" d="M23.5 33 H23.5 A6 6 0 0 1 29.5 39 V61 A6 6 0 0 1 23.5 67 H23.5 A6 6 0 0 1 17.5 61 V39 A6 6 0 0 1 23.5 33 ZM40.5 22 H40.5 A6 6 0 0 1 46.5 28 V72 A6 6 0 0 1 40.5 78 H40.5 A6 6 0 0 1 34.5 72 V28 A6 6 0 0 1 40.5 22 ZM58.5 34 H81.5 A6 6 0 0 1 87.5 40 V40 A6 6 0 0 1 81.5 46 H58.5 A6 6 0 0 1 52.5 40 V40 A6 6 0 0 1 58.5 34 ZM58.5 54 H69.5 A6 6 0 0 1 75.5 60 V60 A6 6 0 0 1 69.5 66 H58.5 A6 6 0 0 1 52.5 60 V60 A6 6 0 0 1 58.5 54 Z"/></svg></span>
   <h1 id="heading">Aside Transcribe</h1>
 </header>
+<nav class="tabs" id="tabs" role="tablist" aria-label="Sections">
+  <button role="tab" id="tab-library" aria-controls="v-library">Library</button>
+  <button role="tab" id="tab-setup" aria-controls="v-setup">Setup</button>
+  <button role="tab" id="tab-settings" aria-controls="v-settings">Settings</button>
+</nav>
+<div class="subhead" id="subhead" hidden></div>
 
-<div class="middle"><div class="wrap">
+<div class="middle" id="middle"><div class="wrap">
+<div id="notnative" class="warn" hidden style="margin-top:16px">Open this inside the AFS Custom Boox app on the tablet.</div>
 
-<!-- ============================== main view ============================== -->
-<div id="main-view">
-  <section class="group">
-    <h2>Floating button</h2>
-    <div id="notnative" class="warn" hidden>Open this inside the AFS Custom Boox app on the tablet.</div>
+<!-- ============================== Library ============================== -->
+<section id="v-library" role="tabpanel" aria-labelledby="tab-library">
+  <div class="libbar" id="libbar">
+    <button id="b-newgroup">New group</button>
+    <button id="b-select">Select</button>
+  </div>
+  <div class="libbar" id="selbar" hidden>
+    <span class="count" id="selcount">0 selected</span>
+    <button id="b-addto">Add to group</button>
+    <button id="b-ungroup">Ungroup</button>
+    <button id="b-delsel">Delete…</button>
+    <button id="b-done" class="primary">Done</button>
+  </div>
+  <div class="chooser" id="chooser" hidden>
+    <b id="ch-title">Add to group</b>
+    <div class="r">
+      <select id="ch-group" aria-label="Group"></select>
+      <input type="text" id="ch-name" placeholder="New group name" aria-label="New group name">
+    </div>
+    <div class="r">
+      <button id="ch-cancel">Cancel</button>
+      <button id="ch-ok" class="primary">Add</button>
+    </div>
+  </div>
+  <div id="lib"></div>
+  <p class="msg" id="msg-lib" role="status"></p>
+</section>
+
+<!-- ============================== Setup ============================== -->
+<section id="v-setup" role="tabpanel" aria-labelledby="tab-setup" hidden>
+  <div class="group">
     <button class="big primary" id="b-bubble">Show floating button</button>
-    <p class="hint" style="margin-top:8px">A small <b>MIC</b> bubble floats over every app and your normal keyboard keeps working. <b>Tap</b> it to open the panel, <b>long-press</b> to start or stop recording, <b>drag</b> to move it. Drag the panel’s top grip to move the panel; tap the grip to switch between small and large.</p>
-  </section>
-
-  <section class="group">
-    <h2>Set up (once)</h2>
+    <p class="hint" style="margin-top:8px">The bubble floats over every app and your keyboard keeps working. <b>Tap</b> it for the panel, <b>long-press</b> to record, <b>drag</b> to move. The panel’s grip moves it; tap the grip to resize.</p>
+    <p class="msg" id="msg-setup" role="status"></p>
+  </div>
+  <div class="group">
+    <h2>Set up once</h2>
     <div class="step" id="s-mic">
       <span class="mark">1</span>
-      <span class="txt"><b>Allow the microphone</b><span class="hint">Needed to hear the presenter.</span></span>
+      <span class="txt"><b>Microphone</b><span class="hint">To hear the presenter.</span></span>
       <button id="b-mic">Allow</button>
     </div>
     <div class="step" id="s-eng">
@@ -92,45 +166,40 @@ input[type=checkbox]{width:32px;height:32px;accent-color:#000}
     </div>
     <div class="step" id="s-ovl">
       <span class="mark">3</span>
-      <span class="txt"><b>Display over other apps</b><span class="hint">Lets the bubble and panel float on top. Switch it on for AFS Custom Boox, then come back.</span></span>
+      <span class="txt"><b>Display over other apps</b><span class="hint">Lets the bubble and panel float on top.</span></span>
       <button id="b-ovl">Allow</button>
     </div>
     <div class="step" id="s-acc">
       <span class="mark">4</span>
-      <span class="txt"><b>Push into text fields</b> (recommended)<span class="hint">Settings → Accessibility → Aside Transcribe → On. It only acts when you tap Push. Without it, Push copies the text so you can paste it.</span></span>
+      <span class="txt"><b>Push into text fields</b><span class="hint">Accessibility → Aside Transcribe → On. Without it, Push copies instead.</span></span>
       <button id="b-acc">Open</button>
     </div>
     <div class="step" id="s-key">
       <span class="mark">5</span>
-      <span class="txt"><b>Claude API key</b> (for Check and Key points)<span class="hint">Below in Settings. Without it, Check still shows words the speech engine was unsure of.</span></span>
+      <span class="txt"><b>Claude API key (optional)</b><span class="hint">In Settings. For the full Check and key points.</span></span>
     </div>
-  </section>
-
-  <section class="group">
+  </div>
+  <div class="group">
     <h2>How it flows</h2>
     <ol>
-      <li><b>Live</b> — tap ● Start. The talk is transcribed into Live; nothing is typed into your notes.</li>
-      <li><b>Prep ▸</b> — at the end of a talk or section. It finishes the sentence being spoken, moves that segment to Prep and checks it and writes key points automatically. Recording carries on into the next segment. <b>Clear</b> empties Live (Undo brings it back).</li>
-      <li><b>Prep</b> — <b>Check</b> steps through words that may be misheard (tap a fix, Keep or Delete). <b>Key points</b> summarises the talk. <b>Edit</b> opens it here to type changes.</li>
-      <li><b>Push</b> — tap into your notes, then Push. It inserts the transcript (or the key points, when showing them) at the cursor.</li>
-      <li><b>Library</b> — every recording is kept here and in the panel.</li>
+      <li><b>Live</b>: tap Start. The talk collects in Live; nothing is typed yet.</li>
+      <li><b>Prep ▸</b>: waits for the sentence to end, moves the segment to Prep and checks it. Recording carries on into the next segment.</li>
+      <li><b>Prep</b>: fix flagged words, read key points, then tap into your notes and <b>Push</b>.</li>
+      <li><b>Library</b> (here): every recording. Group them, and get key points for a whole group.</li>
     </ol>
-  </section>
+  </div>
+</section>
 
-  <section class="group" id="library">
-    <h2>Library</h2>
-    <ul class="lib" id="lib"></ul>
-    <p class="hint" id="lib-empty" hidden>No recordings yet.</p>
-  </section>
-
-  <section class="group">
-    <h2>Settings</h2>
+<!-- ============================== Settings ============================== -->
+<section id="v-settings" role="tabpanel" aria-labelledby="tab-settings" hidden>
+  <div class="group">
+    <h2>Claude (optional)</h2>
     <div class="row">
-      <label for="apiKey"><b>Claude API key</b><span class="hint" id="h-key">Stored only on this tablet. From console.anthropic.com.</span></label>
-      <input type="password" id="apiKey" placeholder="sk-ant-…" autocomplete="off" autocapitalize="off" spellcheck="false" style="flex:1;min-width:12em">
+      <label for="apiKey"><b>API key</b> <span class="hint" id="h-key">Stored only on this tablet.</span></label>
+      <input type="password" id="apiKey" placeholder="sk-ant-…" autocomplete="off" autocapitalize="off" spellcheck="false">
     </div>
     <div class="row">
-      <label for="model"><b>Claude model</b></label>
+      <label for="model"><b>Model</b></label>
       <select id="model">
         <option value="claude-sonnet-5-5">Sonnet 5.5 (default)</option>
         <option value="claude-haiku-5-5">Haiku 5.5 (faster, cheaper)</option>
@@ -138,11 +207,14 @@ input[type=checkbox]{width:32px;height:32px;accent-color:#000}
       </select>
     </div>
     <div class="row" style="display:block">
-      <label for="context"><b>Context for Check and Key points</b><span class="hint">Topic, speakers, names and terms to expect, e.g. “AEC tech conference; Revit, Grasshopper, Rhino, Forma, Perkins&amp;Will”.</span></label>
-      <textarea id="context" rows="3" style="margin-top:8px"></textarea>
+      <label for="context" class="field"><b>Context</b> <span class="hint">Topic, speakers, terms to expect, e.g. “AEC tech conference; Revit, Grasshopper, Forma”.</span></label>
+      <textarea id="context"></textarea>
     </div>
+  </div>
+  <div class="group">
+    <h2>Text and speech</h2>
     <div class="row">
-      <label for="autoPeriod"><b>Period at each pause</b><span class="hint">Ends every phrase with “. ” unless it already has punctuation.</span></label>
+      <label for="autoPeriod"><b>Period at each pause</b></label>
       <input type="checkbox" id="autoPeriod">
     </div>
     <div class="row">
@@ -150,7 +222,7 @@ input[type=checkbox]{width:32px;height:32px;accent-color:#000}
       <input type="checkbox" id="cap">
     </div>
     <div class="row">
-      <label for="engine"><b>Speech engine</b><span class="hint">On-device works without Wi-Fi if the tablet has it. Auto prefers on-device.</span></label>
+      <label for="engine"><b>Speech engine</b> <span class="hint">On-device works offline; Online is lighter on the tablet.</span></label>
       <select id="engine">
         <option value="auto">Auto</option>
         <option value="device">On-device</option>
@@ -158,60 +230,92 @@ input[type=checkbox]{width:32px;height:32px;accent-color:#000}
       </select>
     </div>
     <div class="row">
-      <label for="mute"><b>Silence start beeps</b><span class="hint">Mutes media and notification sounds while recording, restored on Stop.</span></label>
+      <label for="mute"><b>Silence start beeps</b></label>
       <input type="checkbox" id="mute">
     </div>
     <div class="row">
-      <label for="lang"><b>Language</b><span class="hint">Blank = tablet language. Examples: en-US, en-GB.</span></label>
-      <input type="text" id="lang" placeholder="en-US" size="8" autocomplete="off" autocapitalize="off">
+      <label for="lang"><b>Language</b> <span class="hint">Blank = the tablet’s.</span></label>
+      <input type="text" id="lang" placeholder="en-US" autocomplete="off" autocapitalize="off">
     </div>
-    <p class="msg" id="msg-set" role="status"></p>
-  </section>
-
-  <section class="group">
+  </div>
+  <div class="group">
     <h2>Raw backup</h2>
-    <p class="hint">Every phrase ever heard, in order, as a safety net.</p>
+    <span class="hint">Every phrase ever heard, in order.</span>
     <div class="btns">
       <button id="b-raw-copy">Copy</button>
       <button id="b-raw-share">Share</button>
       <button id="b-raw-clear">Clear…</button>
     </div>
-    <p class="msg" id="msg-raw" role="status"></p>
-  </section>
-</div>
+    <p class="msg" id="msg-set" role="status"></p>
+  </div>
+</section>
 
-<!-- ============================== recording detail ============================== -->
-<div id="detail-view" hidden>
-  <section class="group">
-    <div class="row" style="display:block">
-      <label for="d-title"><b>Title</b></label>
-      <input type="text" id="d-title" style="margin-top:6px">
-      <span class="hint" id="d-meta"></span>
+<!-- ============================== Group ============================== -->
+<section id="v-group" hidden>
+  <div class="group">
+    <label for="g-name" class="field"><b>Group name</b></label>
+    <input type="text" id="g-name">
+    <span class="hint" id="g-meta"></span>
+  </div>
+  <div class="group">
+    <label for="g-points" class="field"><b>Key points for the whole group</b></label>
+    <textarea id="g-points" placeholder="None yet."></textarea>
+    <div class="btns">
+      <button id="g-gen" class="primary">Generate key points</button>
+      <button id="g-pcopy">Copy</button>
+      <button id="g-prep">Put in Prep</button>
     </div>
-    <label for="d-text"><b>Transcript</b> <span class="hint">Type corrections here. Saving turns the transcript into plain edited text (flags are cleared).</span></label>
-    <textarea id="d-text" style="margin-top:6px"></textarea>
+    <p class="msg" id="msg-g" role="status"></p>
+  </div>
+  <div class="group">
+    <h2>Recordings</h2>
+    <ul class="lib" id="g-list" style="border:2px solid #000"></ul>
+    <div class="btns">
+      <button id="g-copyall">Copy everything</button>
+      <button id="g-share">Share</button>
+      <button id="g-delete">Delete group…</button>
+    </div>
+    <span class="hint" style="margin-top:6px">Deleting a group keeps its recordings.</span>
+  </div>
+</section>
+
+<!-- ============================== Recording ============================== -->
+<section id="v-rec" hidden>
+  <div class="group">
+    <label for="d-title" class="field"><b>Title</b></label>
+    <input type="text" id="d-title">
+    <span class="hint" id="d-meta"></span>
+    <div class="row" style="margin-top:10px">
+      <label for="d-group"><b>Group</b></label>
+      <select id="d-group" style="flex:1"></select>
+      <input type="text" id="d-newgroup" placeholder="New group name" aria-label="New group name" hidden style="flex:1 1 100%">
+    </div>
+  </div>
+  <div class="group">
+    <label for="d-text" class="field"><b>Transcript</b> <span class="hint">Type corrections here. Saving turns it into plain edited text (flags are cleared).</span></label>
+    <textarea id="d-text"></textarea>
     <div class="btns">
       <button id="d-copy">Copy transcript</button>
       <button id="d-share">Share</button>
     </div>
-  </section>
-  <section class="group">
-    <label for="d-points"><b>Key points</b></label>
-    <textarea id="d-points" style="margin-top:6px" placeholder="None yet."></textarea>
+  </div>
+  <div class="group">
+    <label for="d-points" class="field"><b>Key points</b></label>
+    <textarea id="d-points" placeholder="None yet."></textarea>
     <div class="btns">
       <button id="d-gen">Generate key points</button>
       <button id="d-pcopy">Copy key points</button>
     </div>
-  </section>
-  <section class="group">
+  </div>
+  <div class="group">
     <div class="btns">
       <button class="primary" id="d-save">Save</button>
       <button id="d-prep">Save &amp; put in Prep</button>
       <button id="d-delete">Delete…</button>
     </div>
     <p class="msg" id="msg-d" role="status"></p>
-  </section>
-</div>
+  </div>
+</section>
 
 </div></div>
 

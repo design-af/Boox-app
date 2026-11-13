@@ -44,6 +44,7 @@ button.on,button.dark{background:#000;color:#fff}
 #pop .r{display:flex;gap:4px;flex-wrap:wrap;margin-top:4px}
 #pop .r button{flex:1 1 auto;min-height:36px}
 .sm{font-size:.78rem;color:#333}
+.ask{flex:1.4;align-self:center;font-weight:700;font-size:.9rem;padding-left:4px}
 </style>
 </head>
 <body>
@@ -56,10 +57,14 @@ button.on,button.dark{background:#000;color:#fff}
   <div class="row tabs">
     <button id="t-live">Live</button>
     <button id="t-prep">Prep</button>
-    <button id="t-lib">Library</button>
   </div>
   <div id="content"></div>
   <div id="pop"></div>
+  <div class="row" id="confirm-clear" hidden>
+    <span class="ask">Clear everything in Live?</span>
+    <button id="clear-no">Cancel</button>
+    <button id="clear-yes" class="dark">Yes, clear</button>
+  </div>
   <div class="row" id="act-live">
     <button id="move" class="dark" style="flex:1.6">Prep &#9656;</button>
     <button id="clear">Clear</button>
@@ -76,11 +81,6 @@ button.on,button.dark{background:#000;color:#fff}
       <button class="undo">&#8630; Undo</button>
       <button id="push" class="dark">Push &#9656;</button>
     </div>
-  </div>
-  <div class="row" id="act-lib" hidden>
-    <button id="lib-refresh">Refresh</button>
-    <button id="lib-app">In app</button>
-    <button id="quit">Close</button>
   </div>
 <script src="kbcore.js"></script>
 <script src="panel.js"></script>

@@ -90,6 +90,11 @@ public class DictationService extends Service {
     private boolean speechActive;     // words heard since the last final result
     private boolean cutPending;       // Prep ▸ asked to finish the current sentence
     private final Runnable cutFallback = () -> { if (cutPending) { cutPending = false; js("KB.onCut()"); } };
+    private final Runnable cutForce = () -> {
+        if (cutPending && recognizer != null) {
+            try { recognizer.stopListening(); } catch (Exception ignored) { }
+        }
+    };
     private boolean jsReady;
     private final ArrayList<String> queued = new ArrayList<>();
 
@@ -507,14 +512,19 @@ public class DictationService extends Service {
         }
         @JavascriptInterface public void start() { main.post(DictationService.this::startRec); }
         @JavascriptInterface public void stop() { main.post(() -> stopRec("Stopped")); }
-        /** Finish the sentence being spoken now; KB.onCut() follows its phrase. */
+        /**
+         * Prep: let the sentence being spoken end naturally (the recogniser closes the phrase at
+         * the speaker's pause), then KB.onCut() follows that phrase. If they keep talking, the
+         * phrase is closed after 12 s; KB.onCut() is sent regardless after 18 s.
+         */
         @JavascriptInterface public void cut() {
             main.post(() -> {
                 if (running && recognizer != null && speechActive) {
                     cutPending = true;
-                    try { recognizer.stopListening(); } catch (Exception e) { cutFallback.run(); return; }
+                    main.removeCallbacks(cutForce);
                     main.removeCallbacks(cutFallback);
-                    main.postDelayed(cutFallback, 5000);
+                    main.postDelayed(cutForce, 12000);
+                    main.postDelayed(cutFallback, 18000);
                 } else {
                     js("KB.onCut()");
                 }
@@ -613,6 +623,7 @@ public class DictationService extends Service {
         if (cutPending) {
             cutPending = false;
             main.removeCallbacks(cutFallback);
+            main.removeCallbacks(cutForce);
             js("KB.onCut()");
         }
         main.removeCallbacks(listenRunnable);
@@ -736,6 +747,7 @@ public class DictationService extends Service {
             if (cutPending) {
                 cutPending = false;
                 main.removeCallbacks(cutFallback);
+                main.removeCallbacks(cutForce);
                 js("KB.onCut()");
             }
             js("KB.onPartial(\"\")");
@@ -751,6 +763,7 @@ public class DictationService extends Service {
             if (cutPending) {
                 cutPending = false;
                 main.removeCallbacks(cutFallback);
+                main.removeCallbacks(cutForce);
                 js("KB.onCut()");
             }
             if (!running) return;

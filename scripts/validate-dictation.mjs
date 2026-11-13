@@ -58,4 +58,20 @@ assert.equal(req.tool_choice.name, 'report_misheard');
 assert.match(req.messages[0].content, /AEC conference/);
 assert.ok(K.summaryRequest(rec, {}, '').messages[0].content.includes('Title:'));
 
+// Groups.
+const data = { groups: [K.newGroup('Day 1'), K.newGroup('Keynote')] };
+K.assignToGroup(data, data.groups[0].id, ['a', 'b']);
+K.assignToGroup(data, data.groups[1].id, ['b']);
+assert.deepEqual(data.groups[0].ids, ['a']);
+assert.equal(K.groupOf(data, 'b').name, 'Keynote');
+K.removeFromGroups(data, ['a']);
+assert.equal(K.groupOf(data, 'a'), null);
+const gr = K.groupSummaryRequest('Day 1', [r2, rec], {}, 'AEC');
+assert.match(gr.messages[0].content, /Segment 1: .*\n[\s\S]*Segment 2: /);
+assert.match(gr.messages[0].content, /Day 1/);
+const g = K.newGroup('Day 1');
+K.applySummary(g, { content: [{ type: 'text', text: 'Title: Big day\n- one' }] });
+assert.equal(g.summary, '- one');
+assert.ok(K.groupKeyPointsText(g).startsWith('Key points \u2014 Day 1\n- one'));
+
 console.log('Dictation: recording logic checks out.');

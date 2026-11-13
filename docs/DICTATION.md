@@ -46,3 +46,12 @@ Flow: **Live → Prep → Push**, every recording kept in a **Library**.
   in the segment; then the segment moves to Prep and is processed automatically (local check +
   Claude check and key points in parallel, if a key is set). Clear removes the Live recording;
   Undo restores it, keeping anything heard since after it.
+- Build 25: app page split into tabs that fit the Boox screen without scrolling: **Library**
+  (groups as black-headed boxes with their recordings, then ungrouped recordings by day; Select →
+  Add to group / Ungroup / Delete; New group), **Setup**, **Settings**. Group view: rename, key
+  points across all its recordings (`groupSummaryRequest`), copy/share everything, put key points
+  in Prep, remove recordings, delete group (keeps recordings). Groups live in
+  `files/dictation/groups.json` (`DictationStore.loadGroups/saveGroups`, plugin `groups` /
+  `saveGroups`); a recording is in at most one group. The panel no longer has a Library tab.
+  Live's Clear asks "Clear everything in Live?" first. Prep ▸ now waits for the speaker's own pause
+  to end the sentence (forced after 12 s, gives up after 18 s) instead of cutting at the tap.
