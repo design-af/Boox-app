@@ -137,4 +137,27 @@ assert.equal(made[1].event, 'AEC Tech Day · 13 Nov');
 assert.equal(made[0].eventId, made[1].eventId);
 assert.deepEqual(made[1].speakers, ['A. Lee', 'B. Kim']);
 
+// Managing symposiums.
+const md = { groups: [] };
+const evMade = K.makeSessionGroups(md, sym);
+assert.equal(md.events.length, 1);
+const evId = md.events[0].id;
+K.renameEvent(md, evId, 'AEC Tech Day 2026');
+assert.ok(K.eventSessions(md, evId).every((g) => g.event === 'AEC Tech Day 2026'));
+const added = K.addSession(md, evId, { time: '14:00', title: 'Closing', speakers: 'Jane Doe, A. Lee' });
+assert.equal(added.name, '14:00 · Closing');
+assert.deepEqual(added.speakers, ['Jane Doe', 'A. Lee']);
+assert.equal(K.eventSessions(md, evId).pop().id, added.id, 'new session goes last');
+K.updateSession(added, { title: 'Wrap-up' });
+assert.equal(added.name, '14:00 · Wrap-up');
+K.assignToGroup(md, added.id, ['r1']);
+assert.deepEqual(K.unsortedIds(md, ['r1', 'r2']), ['r2']);
+K.deleteGroup(md, added.id);
+assert.deepEqual(K.unsortedIds(md, ['r1', 'r2']), ['r1', 'r2'], 'deleting a session unsorts its recordings');
+const e2 = K.newEvent(md, 'Empty forum');
+assert.equal(K.eventSessions(md, e2.id).length, 0);
+K.deleteEvent(md, evId);
+assert.equal(md.groups.length, 0);
+assert.deepEqual(md.events.map((e) => e.name), ['Empty forum']);
+
 console.log('Dictation: recording logic checks out.');

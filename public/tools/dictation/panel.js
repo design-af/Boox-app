@@ -305,13 +305,27 @@
     $('start').className = running ? 'dark' : '';
   }
 
+  /** The picked session's speakers, as names for A, B, C… */
+  function sessionSpeakerNames() {
+    const sg = sessionGroup();
+    return sg && sg.speakers ? sg.speakers.map(K.shortName).filter(Boolean) : [];
+  }
+
   function liveSpeakers() {
     const ids = live ? K.speakerIds(live) : ['A'];
     declaredEarly.forEach((id) => { if (!ids.includes(id)) ids.push(id); });
+    // Before anything is heard, the session's speakers already show as chips.
+    sessionSpeakerNames().forEach((n, i) => { const id = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'[i]; if (id && !ids.includes(id)) ids.push(id); });
     return ids;
   }
   const liveCurrent = () => pending.spk || (live ? K.currentSpeaker(live) : 'A');
-  const tagOf = (id) => live ? K.speakerTag(live, id) : (id === '?' ? '?' : id);
+  function tagOf(id) {
+    if (id === '?') return '?';
+    if (live && live.speakers && live.speakers[id]) return live.speakers[id];
+    const i = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.indexOf(id);
+    const n = sessionSpeakerNames()[i];
+    return n || (live ? K.speakerTag(live, id) : id);
+  }
 
   function loadGroups() {
     try { groupsData = JSON.parse((N.groups && N.groups()) || '{"groups":[]}'); } catch (e) { groupsData = { groups: [] }; }
@@ -394,6 +408,7 @@
         st.liveId = live.id;
         saveState();
         declaredEarly.splice(0).forEach((id) => K.declareSpeaker(live, id));
+        K.applySessionSpeakers(live, sessionSpeakerNames());
       }
       K.addPhrase(live, h, pending);
       pending = { end: null, br: false };
@@ -621,6 +636,9 @@
       st.sessionId = b.dataset.sess || null;
       saveState();
       sessPick = false;
+      // The session's speakers name the chips (and the text being recorded now).
+      if (live && sessionSpeakerNames().length) { K.applySessionSpeakers(live, sessionSpeakerNames()); save(live); }
+      updateBadge();
       const sg = sessionGroup();
       msg(sg ? 'Segments you send to Prep go into “' + sg.name + '”.' : 'No session: segments are not grouped.');
       renderAll();

@@ -250,13 +250,35 @@
     add((first && first.spk && first.spk !== '?') ? first.spk : 'A');
     rec.phrases.forEach((p) => add(p.spk));
     Object.keys(rec.speakers || {}).forEach(add);
-    return seen;
+    // Stable order for chips: A, B, C… (other ids after).
+    const rank = (x) => { const i = LETTERS.indexOf(x); return i < 0 ? 99 : i; };
+    return seen.sort((a, b) => rank(a) - rank(b));
   }
 
   /** Labels appear once a second speaker (or an unknown turn) is in the text. */
   function usesLabels(rec) {
     const turns = new Set(render(rec, { autoPeriod: false, cap: false }).filter((r) => r.spk).map((r) => r.spk));
-    return turns.size > 1 || turns.has('?');
+    // Named speakers (e.g. from the session's programme) are labelled from the first sentence.
+    const named = Object.values(rec.speakers || {}).some((n) => n);
+    return turns.size > 1 || turns.has('?') || (named && turns.size > 0);
+  }
+
+  /** "Jane Doe (Perkins&Will)" -> "Jane Doe" for chips and labels. */
+  const shortName = (n) => String(n || '').replace(/\s*[(\[].*$/, '').trim();
+
+  /**
+   * Names a recording's speakers after a session's speakers: A = first listed, B = second, …
+   * Letters already given a different name by the user are left alone.
+   */
+  function applySessionSpeakers(rec, names) {
+    rec.speakers = rec.speakers || {};
+    (names || []).map(shortName).filter(Boolean).forEach((n, i) => {
+      const id = LETTERS[i];
+      if (!id) return;
+      if (!rec.speakers[id]) rec.speakers[id] = n;
+    });
+    rec.updated = Date.now();
+    return rec;
   }
 
   const speakerName = (rec, id) => id === '?' ? 'Unknown speaker' : ((rec.speakers && rec.speakers[id]) || 'Speaker ' + id);
@@ -631,7 +653,82 @@
       return g;
     });
     data.groups = data.groups.concat(made);
+    ensureEvents(data);
     return made;
+  }
+
+  // ---------------------------------------------------------------- symposium management
+  // groups.json also keeps data.events = [{ id, name, created }] so a symposium exists (and can be
+  // renamed or deleted) on its own; its sessions are the groups with that eventId.
+
+  function ensureEvents(data) {
+    data.groups = data.groups || [];
+    data.events = Array.isArray(data.events) ? data.events : [];
+    for (const g of data.groups) {
+      if (g.eventId && !data.events.some((e) => e.id === g.eventId)) {
+        data.events.push({ id: g.eventId, name: g.event || 'Symposium', created: g.created || Date.now() });
+      }
+    }
+    return data;
+  }
+
+  const eventSessions = (data, eventId) => data.groups.filter((g) => g.eventId === eventId).sort((a, b) => (a.order || 0) - (b.order || 0));
+
+  function newEvent(data, name, now) {
+    ensureEvents(data);
+    now = now || Date.now();
+    const e = { id: 'e' + now.toString(36) + Math.floor(Math.random() * 1296).toString(36), name: String(name || '').trim() || 'Symposium', created: now };
+    data.events.push(e);
+    return e;
+  }
+
+  function renameEvent(data, id, name) {
+    ensureEvents(data);
+    const e = data.events.find((x) => x.id === id);
+    if (!e) return;
+    e.name = String(name || '').trim() || e.name;
+    data.groups.forEach((g) => { if (g.eventId === id) g.event = e.name; });
+  }
+
+  /** Session fields changed: the group's name follows its time and title. */
+  function updateSession(g, f) {
+    if ('time' in f) g.time = String(f.time || '').trim();
+    if ('title' in f) g.title = String(f.title || '').trim();
+    if ('speakers' in f) g.speakers = (Array.isArray(f.speakers) ? f.speakers : String(f.speakers || '').split(',')).map((t) => String(t).trim()).filter(Boolean);
+    g.name = sessionName({ time: g.time || '', title: g.title || '', speakers: g.speakers || [] }) || g.name;
+    g.updated = Date.now();
+    return g;
+  }
+
+  function addSession(data, eventId, f, now) {
+    ensureEvents(data);
+    const e = data.events.find((x) => x.id === eventId);
+    const list = eventSessions(data, eventId);
+    const g = newGroup('Session', now);
+    g.eventId = eventId;
+    g.event = e ? e.name : '';
+    g.order = list.length ? Math.max(...list.map((x) => x.order || 0)) + 1 : 0;
+    updateSession(g, { time: f.time || '', title: f.title || '', speakers: f.speakers || [] });
+    if (!g.title && !g.time && !g.speakers.length) g.name = 'Session ' + (list.length + 1);
+    data.groups.push(g);
+    return g;
+  }
+
+  /** Removes a session or group; its recordings become unsorted. */
+  function deleteGroup(data, gid) { data.groups = data.groups.filter((g) => g.id !== gid); }
+
+  /** Removes a symposium and its sessions; their recordings become unsorted. */
+  function deleteEvent(data, id) {
+    ensureEvents(data);
+    data.groups = data.groups.filter((g) => g.eventId !== id);
+    data.events = data.events.filter((e) => e.id !== id);
+  }
+
+  /** Recording ids that are in no session or group. */
+  function unsortedIds(data, ids) {
+    const inGroup = new Set();
+    (data.groups || []).forEach((g) => (g.ids || []).forEach((id) => inGroup.add(id)));
+    return ids.filter((id) => !inGroup.has(id));
   }
 
   const groupKeyPointsText = (g) => 'Key points \u2014 ' + (g.name || g.title) + '\n' + (g.summary || '').trim();
@@ -643,9 +740,10 @@
     phraseById, addPhrase, altFlags, findRange, localCheck, addFlag, sortFlags, replaceWords, applyFlag,
     keepFlag, deletePhrase, deleteLastWord, setEditedText, auditRequest, applyAudit, summaryRequest,
     applySummary, keyPointsText, speakerIds, usesLabels, speakerName, speakerTag, newSpeakerId, declareSpeaker,
-    renameSpeaker, currentSpeaker, splitTurn, clearTurn, unknownTurnFlags, resolveSpeakerFlag, dismissSpeakerFlag,
+    renameSpeaker, currentSpeaker, splitTurn, shortName, applySessionSpeakers, clearTurn, unknownTurnFlags, resolveSpeakerFlag, dismissSpeakerFlag,
     speakerRequest, applySpeakers, newGroup, assignToGroup, removeFromGroups, groupOf, groupSummaryRequest,
-    groupKeyPointsText, symposiumRequest, parseSymposium, sessionName, makeSessionGroups,
+    groupKeyPointsText, symposiumRequest, parseSymposium, sessionName, makeSessionGroups, ensureEvents, eventSessions,
+    newEvent, renameEvent, updateSession, addSession, deleteGroup, deleteEvent, unsortedIds,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.KBCore = api;
