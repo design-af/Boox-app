@@ -1,4 +1,4 @@
-// AFS Dictation floating panel (runs in DictationService's overlay WebView).
+// Aside Transcribe floating panel (runs in DictationService's overlay WebView).
 // Live: the recording being transcribed now. Move to prep sends it to Prep and the next words
 // start a new Live recording (recording never stops for this). Prep: Check (possible
 // mishearings), Key points (Claude), Edit (in the app), Push (into the focused field).
@@ -308,7 +308,7 @@
         msg('Pushed into the field ✓');
         renderAll();
       } else if (result.indexOf('noservice') === 0) {
-        msg('Copied — long-press the field and Paste. (Turn on AFS Dictation in Accessibility to push directly.)', true);
+        msg('Copied — long-press the field and Paste. (Turn on Aside Transcribe in Accessibility to push directly.)', true);
       } else {
         msg('Couldn’t find the text field — copied instead, so long-press it and Paste.' + (diag ? ' Details: ' + diag : ''), true);
       }

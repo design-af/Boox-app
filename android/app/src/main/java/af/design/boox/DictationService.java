@@ -55,7 +55,7 @@ import java.util.Date;
 import java.util.Locale;
 
 /**
- * AFS Dictation floating button. A foreground service (microphone) that draws a small draggable
+ * Aside Transcribe floating button. A foreground service (microphone) that draws a small draggable
  * bubble over every app; tapping it opens a compact panel (a WebView running
  * public/tools/dictation/panel.html) with Live / Prep / Library. The user's own keyboard keeps
  * working because neither window takes focus. Push goes through DictationAccessibility, or the
@@ -79,7 +79,7 @@ public class DictationService extends Service {
     private final Handler main = new Handler(Looper.getMainLooper());
     private WindowManager wm;
 
-    private TextView bubble;
+    private AsideBubbleView bubble;
     private WindowManager.LayoutParams bubbleLp;
     private LinearLayout panel;
     private WindowManager.LayoutParams panelLp;
@@ -172,8 +172,8 @@ public class DictationService extends Service {
         if (Build.VERSION.SDK_INT >= 26) {
             NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
             if (nm != null && nm.getNotificationChannel(CHANNEL) == null) {
-                NotificationChannel ch = new NotificationChannel(CHANNEL, "Dictation", NotificationManager.IMPORTANCE_LOW);
-                ch.setDescription("Shows while the AFS Dictation floating button is on");
+                NotificationChannel ch = new NotificationChannel(CHANNEL, "Aside Transcribe", NotificationManager.IMPORTANCE_LOW);
+                ch.setDescription("Shows while the Aside Transcribe floating button is on");
                 ch.setShowBadge(false);
                 nm.createNotificationChannel(ch);
             }
@@ -190,8 +190,8 @@ public class DictationService extends Service {
         open.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP);
         PendingIntent content = PendingIntent.getActivity(this, 0, open, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
         return new NotificationCompat.Builder(this, CHANNEL)
-                .setSmallIcon(R.mipmap.ic_launcher)
-                .setContentTitle(running ? "AFS Dictation — recording" : "AFS Dictation")
+                .setSmallIcon(R.drawable.ic_aside)
+                .setContentTitle(running ? "Aside Transcribe \u2014 recording" : "Aside Transcribe")
                 .setContentText(running ? "Listening. Tap the floating button for Live / Prep / Push." : "Floating button is on. Long-press it to record.")
                 .setContentIntent(content)
                 .setOngoing(true)
@@ -251,7 +251,10 @@ public class DictationService extends Service {
 
         // Grip: drag to move the panel, tap to switch between small (1/3) and large (2/3).
         TextView grip = new TextView(this);
-        grip.setText("\u2261  drag to move  \u00B7  tap to resize  \u2261");
+        grip.setText("Aside Transcribe  \u00B7  drag  \u00B7  tap to resize");
+        grip.setCompoundDrawablesRelativeWithIntrinsicBounds(R.drawable.ic_aside, 0, 0, 0);
+        grip.setCompoundDrawablePadding(dp(6));
+        grip.setPadding(dp(10), 0, dp(10), 0);
         grip.setGravity(Gravity.CENTER);
         grip.setTextColor(Color.WHITE);
         grip.setBackgroundColor(Color.BLACK);
@@ -381,10 +384,7 @@ public class DictationService extends Service {
 
     @SuppressLint("ClickableViewAccessibility")
     private void buildBubble() {
-        bubble = new TextView(this);
-        bubble.setGravity(Gravity.CENTER);
-        bubble.setTypeface(Typeface.DEFAULT_BOLD);
-        bubble.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
+        bubble = new AsideBubbleView(this);
         int size = dp(66);
         DisplayMetrics m = screen();
         bubbleLp = new WindowManager.LayoutParams(size, size, overlayType(),
@@ -464,19 +464,7 @@ public class DictationService extends Service {
 
     private void styleBubble() {
         if (bubble == null) return;
-        GradientDrawable d = new GradientDrawable();
-        d.setShape(GradientDrawable.OVAL);
-        d.setStroke(dp(3), Color.BLACK);
-        if (running) {
-            d.setColor(Color.BLACK);
-            bubble.setTextColor(Color.WHITE);
-            bubble.setText(panelOpen ? "●–" : "● REC");
-        } else {
-            d.setColor(Color.WHITE);
-            bubble.setTextColor(Color.BLACK);
-            bubble.setText(panelOpen ? "–" : "MIC");
-        }
-        bubble.setBackground(d);
+        bubble.setState(running, panelOpen);
         if (bubbleLp != null) {
             if (running) bubbleLp.flags |= WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON;
             else bubbleLp.flags &= ~WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON;
@@ -549,7 +537,7 @@ public class DictationService extends Service {
                 if (!"pasted".equals(result) && !"set".equals(result)) {
                     android.content.ClipboardManager cm = (android.content.ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
                     if (cm != null) {
-                        try { cm.setPrimaryClip(android.content.ClipData.newPlainText("AFS Dictation", text)); result = result + "+copied"; } catch (Exception ignored) { }
+                        try { cm.setPrimaryClip(android.content.ClipData.newPlainText("Aside Transcribe", text)); result = result + "+copied"; } catch (Exception ignored) { }
                     }
                 }
                 js("KB.onPushed(" + JSONObject.quote(result) + "," + JSONObject.quote(diag) + ")");

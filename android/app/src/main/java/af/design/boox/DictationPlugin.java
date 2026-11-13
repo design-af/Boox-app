@@ -25,7 +25,7 @@ import com.getcapacitor.annotation.PermissionCallback;
 import java.io.File;
 
 /**
- * App-side controls for AFS Dictation (floating button, settings, recordings library).
+ * App-side controls for Aside Transcribe (floating button, settings, recordings library).
  *
  * JS: Capacitor.nativePromise("Dictation", method, args)
  *   status | requestMic | openOverlaySettings | openAccessibilitySettings | openAppSettings
@@ -243,7 +243,7 @@ public class DictationPlugin extends Plugin {
     public void copyText(PluginCall call) {
         ClipboardManager cm = (ClipboardManager) getContext().getSystemService(Context.CLIPBOARD_SERVICE);
         if (cm == null) { call.reject("No clipboard"); return; }
-        cm.setPrimaryClip(ClipData.newPlainText("AFS Dictation", call.getString("text", "")));
+        cm.setPrimaryClip(ClipData.newPlainText("Aside Transcribe", call.getString("text", "")));
         call.resolve();
     }
 
@@ -252,7 +252,7 @@ public class DictationPlugin extends Plugin {
         try {
             Intent send = new Intent(Intent.ACTION_SEND);
             send.setType("text/plain");
-            send.putExtra(Intent.EXTRA_SUBJECT, call.getString("subject", "Dictation"));
+            send.putExtra(Intent.EXTRA_SUBJECT, call.getString("subject", "Aside Transcribe"));
             send.putExtra(Intent.EXTRA_TEXT, call.getString("text", ""));
             Intent chooser = Intent.createChooser(send, "Send");
             chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);

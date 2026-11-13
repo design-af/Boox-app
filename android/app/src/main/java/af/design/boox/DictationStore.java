@@ -12,7 +12,7 @@ import java.io.FileWriter;
 import java.nio.charset.StandardCharsets;
 
 /**
- * Files for AFS Dictation, shared by the floating panel (DictationService) and the app page
+ * Files for Aside Transcribe, shared by the floating panel (DictationService) and the app page
  * (DictationPlugin). Everything lives in the app's private files/dictation/ folder:
  *   recordings/<id>.json  one recording each (format in public/tools/dictation/kbcore.js)
  *   state.json            { liveId, prepId }

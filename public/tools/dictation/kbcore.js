@@ -1,4 +1,4 @@
-// Shared logic for AFS Dictation recordings: formatting, flags (possible mishearings), edits and
+// Shared logic for Aside Transcribe recordings: formatting, flags (possible mishearings), edits and
 // Claude request/response handling. Used by the keyboard (keyboard.js), the app page (app.js) and
 // scripts/validate-dictation.mjs. No DOM access here.
 //

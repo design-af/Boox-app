@@ -1,4 +1,4 @@
-# Dictation (AFS Dictation floating button)
+# Aside Transcribe (Dictation tool)
 
 Live transcription of talks over any app, with the user's own keyboard still in use.
 Flow: **Live → Prep → Push**, every recording kept in a **Library**.

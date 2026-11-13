@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- AFS Dictation push-to-field. Listens only to focus changes (to remember the last text field)
+<!-- Aside Transcribe push-to-field. Listens only to focus changes (to remember the last text field)
      and window changes (to keep the floating panel above the keyboard) - never to keystrokes. -->
 <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
     android:description="@string/dictation_accessibility_description"

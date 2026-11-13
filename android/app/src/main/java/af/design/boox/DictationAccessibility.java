@@ -20,7 +20,7 @@ import java.util.List;
  * Lets the floating Dictation panel push text into the text field the user is typing in, in any
  * app, without replacing their keyboard. It remembers the last text field the user touched and
  * where the on-screen keyboard is (so the panel can stay above it); it acts only when the user
- * taps Push. Turned on by the user in Settings > Accessibility > AFS Dictation.
+ * taps Push. Turned on by the user in Settings > Accessibility > Aside Transcribe.
  */
 public class DictationAccessibility extends AccessibilityService {
 
@@ -218,7 +218,7 @@ public class DictationAccessibility extends AccessibilityService {
         ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
         if (cm != null) {
             try {
-                cm.setPrimaryClip(ClipData.newPlainText("AFS Dictation", out));
+                cm.setPrimaryClip(ClipData.newPlainText("Aside Transcribe", out));
                 if (node.performAction(AccessibilityNodeInfo.ACTION_PASTE)) return "pasted";
             } catch (Exception ignored) { }
         }

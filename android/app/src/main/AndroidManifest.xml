@@ -42,16 +42,16 @@
             android:exported="false"
             android:foregroundServiceType="mediaPlayback" />
 
-        <!-- AFS Dictation: floating button + panel over other apps (records with the microphone). -->
+        <!-- Aside Transcribe: floating button + panel over other apps (records with the microphone). -->
         <service
             android:name=".DictationService"
             android:exported="false"
             android:foregroundServiceType="microphone" />
 
-        <!-- AFS Dictation: pushes text into the focused field when the user taps Push. -->
+        <!-- Aside Transcribe: pushes text into the focused field when the user taps Push. -->
         <service
             android:name=".DictationAccessibility"
-            android:label="AFS Dictation"
+            android:label="Aside Transcribe"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
             android:exported="true">
             <intent-filter>
@@ -68,7 +68,7 @@
         <intent>
             <action android:name="android.intent.action.TTS_SERVICE" />
         </intent>
-        <!-- Speech recognition engines, for AFS Dictation. -->
+        <!-- Speech recognition engines, for Aside Transcribe. -->
         <intent>
             <action android:name="android.speech.RecognitionService" />
         </intent>

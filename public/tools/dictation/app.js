@@ -100,7 +100,7 @@
     $('main-view').hidden = true;
     $('detail-view').hidden = false;
     $('heading').textContent = 'Recording';
-    $('back').textContent = '← Dictation';
+    $('back').textContent = '← Aside';
     $('d-title').value = current.title || '';
     $('d-title').placeholder = K.defaultTitle(current);
     $('d-text').value = K.plain(current, opts());
@@ -116,7 +116,7 @@
     current = null;
     $('detail-view').hidden = true;
     $('main-view').hidden = false;
-    $('heading').textContent = 'Dictation';
+    $('heading').textContent = 'Aside Transcribe';
     $('back').textContent = '← Tools';
     if (location.hash) history.replaceState(null, '', location.pathname);
     loadLibrary();
@@ -239,7 +239,7 @@
     try { const t = (await call('transcript')).text; await call('copyText', { text: t }); alertMsg('msg-raw', 'Copied.'); } catch (e) { alertMsg('msg-raw', errText(e)); }
   });
   $('b-raw-share').addEventListener('click', async () => {
-    try { const t = (await call('transcript')).text; await call('shareText', { text: t, subject: 'Dictation backup' }); } catch (e) { alertMsg('msg-raw', errText(e)); }
+    try { const t = (await call('transcript')).text; await call('shareText', { text: t, subject: 'Aside Transcribe backup' }); } catch (e) { alertMsg('msg-raw', errText(e)); }
   });
   let rawArmed = 0;
   $('b-raw-clear').addEventListener('click', async () => {
