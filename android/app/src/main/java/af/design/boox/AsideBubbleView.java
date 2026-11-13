@@ -31,13 +31,13 @@ public class AsideBubbleView extends View {
         setContentDescription("Aside Transcribe");
     }
 
-    /** The glyph in a 100 x 100 box (same geometry as the logo). */
+    /** The glyph in a 100 x 100 box (same geometry as the logo), nudged 2.5 right to look centred. */
     static void buildGlyph(Path p) {
         p.reset();
-        p.addRoundRect(new RectF(15, 33, 27, 67), 6, 6, Path.Direction.CW);
-        p.addRoundRect(new RectF(32, 22, 44, 78), 6, 6, Path.Direction.CW);
-        p.addRoundRect(new RectF(50, 34, 85, 46), 6, 6, Path.Direction.CW);
-        p.addRoundRect(new RectF(50, 54, 73, 66), 6, 6, Path.Direction.CW);
+        p.addRoundRect(new RectF(17.5f, 33, 29.5f, 67), 6, 6, Path.Direction.CW);
+        p.addRoundRect(new RectF(34.5f, 22, 46.5f, 78), 6, 6, Path.Direction.CW);
+        p.addRoundRect(new RectF(52.5f, 34, 87.5f, 46), 6, 6, Path.Direction.CW);
+        p.addRoundRect(new RectF(52.5f, 54, 75.5f, 66), 6, 6, Path.Direction.CW);
     }
 
     void setState(boolean recording, boolean panelOpen) {
