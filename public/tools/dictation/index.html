@@ -263,7 +263,10 @@ ol li{margin:0 0 4px}
 <!-- ============================== Symposium ============================== -->
 <section id="v-symp" hidden>
   <div class="group">
-    <h2>1 · From a photo, screenshot or web page</h2>
+    <div class="btns" style="margin:0 0 14px">
+      <button id="sy-manual">Type it in myself</button>
+    </div>
+    <h2>Or read it from a photo, screenshot or web page</h2>
     <div class="btns">
       <label class="filebtn" for="sy-pick">Add photo or screenshot</label>
       <input type="file" id="sy-pick" accept="image/*" multiple hidden>
@@ -278,7 +281,7 @@ ol li{margin:0 0 4px}
     <p class="msg" id="msg-sy" role="status"></p>
   </div>
   <div class="group" id="sy-review" hidden>
-    <h2>2 · Check what was read</h2>
+    <h2 id="sy-review-h">Check what was read</h2>
     <label for="sy-event" class="field"><b>Event</b></label>
     <input type="text" id="sy-event" style="width:100%">
     <div id="sy-list"></div>

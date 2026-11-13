@@ -416,6 +416,7 @@
       if (!syData.sessions.length) throw new Error('no sessions found. Try a clearer photo or the full agenda page.');
       say('msg-sy', syData.sessions.length + ' sessions found. Check them below, then Create sessions.');
       renderSymp();
+      $('sy-review-h').textContent = 'Check what was read';
     } catch (e) { say('msg-sy', 'Could not read it: ' + errText(e)); }
     $('sy-read').disabled = false;
   }
@@ -534,6 +535,14 @@
     $('sy-imgs').textContent = syImages.length ? syImages.length + (syImages.length === 1 ? ' image' : ' images') + ' added.' : 'No images yet.';
   });
   $('sy-reset').onclick = resetSymp;
+  $('sy-manual').onclick = () => {
+    // No Claude: start from one empty session and fill it in.
+    syData = { event: '', date: '', sessions: [{ time: '', title: '', speakers: [], room: '' }] };
+    renderSymp();
+    $('sy-review-h').textContent = 'Event and sessions';
+    $('sy-event').placeholder = 'Event name';
+    $('sy-event').focus();
+  };
   $('sy-read').onclick = readSymposium;
   $('sy-add').onclick = () => { collectSymp(); syData.sessions.push({ time: '', title: '', speakers: [], room: '' }); renderSymp(); };
   $('sy-list').addEventListener('click', (e) => {
