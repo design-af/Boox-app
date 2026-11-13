@@ -31,7 +31,7 @@ import java.io.File;
  *   status | requestMic | openOverlaySettings | openAccessibilitySettings | openAppSettings
  *   showBubble | hideBubble | setSettings {engine, mute, cap, autoPeriod, lang, model, context, apiKey}
  *   list | load {id} | save {id, json} | remove {id} | state | setState {json} | claude {body}
- *   groups | saveGroups {json}
+ *   groups | saveGroups {json} | fetchPage {url} (an event web page's HTML, for building a symposium)
  *   transcript | copyText {text} | shareText {text, subject} | clearTranscript
  */
 @CapacitorPlugin(
@@ -226,6 +226,42 @@ public class DictationPlugin extends Plugin {
     public void saveGroups(PluginCall call) {
         if (DictationStore.saveGroups(getContext(), call.getString("json"))) call.resolve();
         else call.reject("Could not save groups");
+    }
+
+    /** Downloads a web page (e.g. an event agenda) so Claude can read it. Off the main thread. */
+    @PluginMethod
+    public void fetchPage(PluginCall call) {
+        String url = call.getString("url", "").trim();
+        if (!url.startsWith("http://") && !url.startsWith("https://")) url = "https://" + url;
+        final String target = url;
+        new Thread(() -> {
+            java.net.HttpURLConnection con = null;
+            try {
+                java.net.URL u = new java.net.URL(target);
+                con = (java.net.HttpURLConnection) u.openConnection();
+                con.setInstanceFollowRedirects(true);
+                con.setConnectTimeout(15000);
+                con.setReadTimeout(30000);
+                con.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android) AppleWebKit/537.36 (KHTML, like Gecko) Chrome Mobile Safari/537.36");
+                con.setRequestProperty("Accept", "text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.5");
+                int code = con.getResponseCode();
+                if (code >= 400) { call.reject("The page answered " + code); return; }
+                java.io.InputStream in = con.getInputStream();
+                java.io.ByteArrayOutputStream buf = new java.io.ByteArrayOutputStream();
+                byte[] b = new byte[16384];
+                int n;
+                while ((n = in.read(b)) > 0 && buf.size() < 3_000_000) buf.write(b, 0, n);
+                in.close();
+                JSObject r = new JSObject();
+                r.put("html", new String(buf.toByteArray(), java.nio.charset.StandardCharsets.UTF_8));
+                r.put("url", con.getURL().toString());
+                call.resolve(r);
+            } catch (Exception e) {
+                call.reject("Could not open the page: " + e.getMessage());
+            } finally {
+                if (con != null) con.disconnect();
+            }
+        }).start();
     }
 
     @PluginMethod

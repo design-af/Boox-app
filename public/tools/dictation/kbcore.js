@@ -542,6 +542,83 @@
     };
   }
 
+  // ---------------------------------------------------------------- symposium (event agenda)
+  // Groups made from an agenda carry: event (event name), eventId, time, title, speakers[], room.
+
+  /** Ask Claude to read an agenda from photos/screenshots and/or a web page's text. */
+  function symposiumRequest(images, pageText, url) {
+    const content = [];
+    (images || []).forEach((im) => content.push({ type: 'image', source: { type: 'base64', media_type: im.media_type || 'image/jpeg', data: im.data } }));
+    let ask = 'Read this event programme (a lecture brief, agenda or symposium schedule) and report its sessions in order. ' +
+      'For each session give the start time as written (or empty), a short title, and the speakers’ names (with their firm or role in brackets when shown). ' +
+      'Leave out breaks, lunch and registration unless they have a speaker. Do not invent anything that is not shown.';
+    if (pageText) ask += '\n\nText of the web page' + (url ? ' (' + url + ')' : '') + ':\n' + String(pageText).slice(0, 60000);
+    content.push({ type: 'text', text: ask });
+    return {
+      max_tokens: 4000,
+      messages: [{ role: 'user', content }],
+      tools: [{
+        name: 'report_symposium',
+        description: 'Report the event and its sessions.',
+        input_schema: {
+          type: 'object',
+          properties: {
+            event: { type: 'string', description: 'event name' },
+            date: { type: 'string', description: 'date as written, or empty' },
+            sessions: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  time: { type: 'string' },
+                  title: { type: 'string' },
+                  speakers: { type: 'array', items: { type: 'string' } },
+                  room: { type: 'string' },
+                },
+                required: ['title'],
+              },
+            },
+          },
+          required: ['event', 'sessions'],
+        },
+      }],
+      tool_choice: { type: 'tool', name: 'report_symposium' },
+    };
+  }
+
+  function parseSymposium(response) {
+    const res = typeof response === 'string' ? JSON.parse(response) : response;
+    const block = (res.content || []).find((c) => c.type === 'tool_use');
+    const d = (block && block.input) || {};
+    return {
+      event: String(d.event || '').trim() || 'Symposium',
+      date: String(d.date || '').trim(),
+      sessions: (d.sessions || []).map((x) => ({
+        time: String(x.time || '').trim(),
+        title: String(x.title || '').trim(),
+        speakers: (x.speakers || []).map((n) => String(n).trim()).filter(Boolean),
+        room: String(x.room || '').trim(),
+      })).filter((x) => x.title || x.speakers.length),
+    };
+  }
+
+  const sessionName = (x) => [x.time, x.title || x.speakers.join(', ')].filter(Boolean).join(' · ');
+
+  /** One group per session, tagged with the event; returns the new groups. */
+  function makeSessionGroups(data, sym, now) {
+    now = now || Date.now();
+    const eventId = 'e' + now.toString(36);
+    const event = sym.event + (sym.date ? ' · ' + sym.date : '');
+    const made = sym.sessions.map((x, i) => {
+      const g = newGroup(sessionName(x), now + i);
+      g.event = event; g.eventId = eventId; g.order = i;
+      g.time = x.time; g.title = x.title; g.speakers = x.speakers.slice(); g.room = x.room || '';
+      return g;
+    });
+    data.groups = data.groups.concat(made);
+    return made;
+  }
+
   const groupKeyPointsText = (g) => 'Key points \u2014 ' + (g.name || g.title) + '\n' + (g.summary || '').trim();
 
   const keyPointsText = (rec) => 'Key points — ' + titleOf(rec) + '\n' + (rec.summary || '').trim();
@@ -553,7 +630,7 @@
     applySummary, keyPointsText, speakerIds, usesLabels, speakerName, speakerTag, newSpeakerId, declareSpeaker,
     renameSpeaker, currentSpeaker, splitTurn, clearTurn, unknownTurnFlags, resolveSpeakerFlag, dismissSpeakerFlag,
     speakerRequest, applySpeakers, newGroup, assignToGroup, removeFromGroups, groupOf, groupSummaryRequest,
-    groupKeyPointsText,
+    groupKeyPointsText, symposiumRequest, parseSymposium, sessionName, makeSessionGroups,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.KBCore = api;

@@ -23,6 +23,8 @@
   let currentGroup = null;      // group open in the group view
   let current = null;           // recording open in the recording view
   let recFrom = 'library';      // where Back from a recording goes
+  let syImages = [];            // [{ media_type, data }] for New symposium
+  let syData = null;            // what Claude read: { event, date, sessions }
 
   const opts = () => ({ cap: !status || status.settings.cap !== false, autoPeriod: !status || status.settings.autoPeriod !== false });
   const context = () => (status && status.settings.context) || '';
@@ -47,12 +49,16 @@
       $('tab-' + t).setAttribute('aria-selected', String(v === t));
     });
     $('v-group').hidden = v !== 'group';
+    $('v-symp').hidden = v !== 'symp';
     $('v-rec').hidden = v !== 'rec';
     if (TABS.includes(v)) {
       $('heading').textContent = 'Aside Transcribe';
       $('back').textContent = '← Tools';
     } else if (v === 'group') {
-      $('heading').textContent = 'Group';
+      $('heading').textContent = currentGroup && currentGroup.event ? 'Session' : 'Group';
+      $('back').textContent = '← Library';
+    } else if (v === 'symp') {
+      $('heading').textContent = 'New symposium';
       $('back').textContent = '← Library';
     } else {
       $('heading').textContent = 'Recording';
@@ -69,7 +75,7 @@
       if (recFrom === 'group' && currentGroup) { openGroup(currentGroup.id); return; }
       show('library'); loadLibrary(); return;
     }
-    if (view === 'group') { currentGroup = null; show('library'); loadLibrary(); return; }
+    if (view === 'group' || view === 'symp') { currentGroup = null; show('library'); loadLibrary(); return; }
     location.href = '../../index.html';
   }
 
@@ -165,13 +171,28 @@
   function renderLibrary() {
     const out = [];
     const byGroup = new Set();
-    const gs = groups.groups.slice().sort((a, b) => (b.updated || 0) - (a.updated || 0));
+    // Events (from New symposium) first, newest first, their sessions in programme order; then other groups.
+    const events = new Map();
+    groups.groups.filter((g) => g.eventId).forEach((g) => {
+      if (!events.has(g.eventId)) events.set(g.eventId, { name: g.event, created: g.created, list: [] });
+      events.get(g.eventId).list.push(g);
+    });
+    const evs = Array.from(events.values()).sort((a, b) => (b.created || 0) - (a.created || 0));
+    const plain = groups.groups.filter((g) => !g.eventId).sort((a, b) => (b.updated || 0) - (a.updated || 0));
+    const gs = [];
+    const heads = new Map();
+    evs.forEach((e) => { e.list.sort((a, b) => (a.order || 0) - (b.order || 0)); e.list.forEach((g, i) => { if (i === 0) heads.set(g.id, e.name); gs.push(g); }); });
+    plain.forEach((g) => gs.push(g));
+    let plainHead = false;
     for (const g of gs) {
+      if (heads.has(g.id)) out.push('<div class="event">' + esc(heads.get(g.id)) + '</div>');
+      else if (!g.eventId && evs.length && !plainHead) { plainHead = true; out.push('<div class="event">Groups</div>'); }
       const ms = g.ids.map(meta).filter(Boolean).sort((a, b) => (a.created || 0) - (b.created || 0));
       ms.forEach((m) => byGroup.add(m.id));
       const words = ms.reduce((n, m) => n + (m.words || 0), 0);
       const info = [ms.length + (ms.length === 1 ? ' recording' : ' recordings'), words + ' words'];
       if (g.summary) info.push('key points ✓');
+      if (g.speakers && g.speakers.length) info.unshift(g.speakers.join(', '));
       out.push('<section class="grp"><div class="grp-h"><button class="open" data-group="' + esc(g.id) + '"><span class="t">' + esc(g.name) +
         '</span><span class="m">' + info.join(' · ') + '</span></button><button class="kp" data-kp="' + esc(g.id) + '">Key points</button></div>' +
         (ms.length ? '<ul class="lib">' + ms.map((m) => rowHtml(m)).join('') + '</ul>' : '<p class="empty" style="padding:12px">Empty. Select recordings, then Add to group.</p>') +
@@ -271,7 +292,9 @@
   function renderGroupList() {
     const ms = currentGroup.ids.map(meta).filter(Boolean).sort((a, b) => (a.created || 0) - (b.created || 0));
     const words = ms.reduce((n, m) => n + (m.words || 0), 0);
-    $('g-meta').textContent = ms.length + (ms.length === 1 ? ' recording' : ' recordings') + ' · ' + words + ' words' +
+    $('g-meta').textContent = (currentGroup.event ? currentGroup.event + ' · ' : '') +
+      (currentGroup.speakers && currentGroup.speakers.length ? currentGroup.speakers.join(', ') + ' · ' : '') +
+      ms.length + (ms.length === 1 ? ' recording' : ' recordings') + ' · ' + words + ' words' +
       (currentGroup.title && currentGroup.title !== currentGroup.name ? ' · suggested title: ' + currentGroup.title : '');
     $('g-list').innerHTML = ms.length ? ms.map((m) => rowHtml(m, { noSelect: true, remove: true })).join('') : '<li><p class="empty" style="padding:12px">No recordings. In the Library, Select some and Add to group.</p></li>';
     $('g-gen').disabled = !ms.length;
@@ -331,6 +354,108 @@
     if ($('g-points').value.trim()) parts.push('Key points\n' + $('g-points').value.trim());
     for (const r of recs) parts.push(K.titleOf(r) + '\n' + K.plain(r, opts()));
     return parts.join('\n\n');
+  }
+
+  // ---------------------------------------------------------------- new symposium
+
+  function resetSymp() {
+    syImages = [];
+    syData = null;
+    $('sy-url').value = '';
+    $('sy-imgs').textContent = 'No images yet. Add every page of the programme.';
+    $('sy-review').hidden = true;
+    say('msg-sy', '');
+  }
+
+  /** Photos are shrunk (longest side 1568 px, JPEG) before going to Claude. */
+  function shrinkImage(file) {
+    return new Promise((resolve, reject) => {
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = () => {
+        const scale = Math.min(1, 1568 / Math.max(img.naturalWidth, img.naturalHeight));
+        const c = document.createElement('canvas');
+        c.width = Math.round(img.naturalWidth * scale);
+        c.height = Math.round(img.naturalHeight * scale);
+        const g = c.getContext('2d');
+        g.fillStyle = '#ffffff';
+        g.fillRect(0, 0, c.width, c.height);
+        g.drawImage(img, 0, 0, c.width, c.height);
+        URL.revokeObjectURL(url);
+        resolve({ media_type: 'image/jpeg', data: c.toDataURL('image/jpeg', 0.85).split(',')[1] });
+      };
+      img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('not an image')); };
+      img.src = url;
+    });
+  }
+
+  function pageText(html) {
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    doc.querySelectorAll('script,style,noscript,svg,iframe').forEach((n) => n.remove());
+    const title = (doc.querySelector('title') || {}).textContent || '';
+    const text = (doc.body ? doc.body.textContent : '').replace(/[ \t]+/g, ' ').replace(/\s*\n\s*/g, '\n').trim();
+    return (title ? title.trim() + '\n' : '') + text;
+  }
+
+  async function readSymposium() {
+    if (!hasKey()) { say('msg-sy', 'Reading the programme needs a Claude API key (Settings tab).'); return; }
+    const url = $('sy-url').value.trim();
+    if (!syImages.length && !url) { say('msg-sy', 'Add a photo or screenshot, or paste the event page link.'); return; }
+    $('sy-read').disabled = true;
+    try {
+      let text = '';
+      if (url) {
+        say('msg-sy', 'Opening the page…');
+        const r = await call('fetchPage', { url });
+        text = pageText(r.html || '');
+        if (text.length < 200 && !syImages.length) throw new Error('that page shows almost no text here (it may need a browser). Take a screenshot of it instead.');
+      }
+      say('msg-sy', 'Claude is reading the programme…');
+      const res = (await call('claude', { body: JSON.stringify(K.symposiumRequest(syImages, text, url)) })).json;
+      syData = K.parseSymposium(res);
+      if (!syData.sessions.length) throw new Error('no sessions found. Try a clearer photo or the full agenda page.');
+      say('msg-sy', syData.sessions.length + ' sessions found. Check them below, then Create sessions.');
+      renderSymp();
+    } catch (e) { say('msg-sy', 'Could not read it: ' + errText(e)); }
+    $('sy-read').disabled = false;
+  }
+
+  function renderSymp() {
+    $('sy-review').hidden = false;
+    $('sy-event').value = syData.event + (syData.date && syData.event.indexOf(syData.date) < 0 ? ' · ' + syData.date : '');
+    syData.date = '';
+    $('sy-list').innerHTML = syData.sessions.map((x, i) =>
+      '<div class="sess" data-i="' + i + '">' +
+      '<input type="text" aria-label="Time" placeholder="Time" data-f="time" value="' + esc(x.time) + '">' +
+      '<input type="text" aria-label="Title" placeholder="Title" data-f="title" value="' + esc(x.title) + '">' +
+      '<input class="who" type="text" aria-label="Speakers" placeholder="Speakers, separated by commas" data-f="speakers" value="' + esc(x.speakers.join(', ')) + '">' +
+      '<button data-rm="' + i + '">Remove</button></div>').join('');
+  }
+
+  function collectSymp() {
+    if (!syData) syData = { event: '', date: '', sessions: [] };
+    syData.event = $('sy-event').value.trim();
+    syData.sessions = Array.from($('sy-list').querySelectorAll('.sess')).map((el) => ({
+      time: el.querySelector('[data-f="time"]').value.trim(),
+      title: el.querySelector('[data-f="title"]').value.trim(),
+      speakers: el.querySelector('[data-f="speakers"]').value.split(',').map((t) => t.trim()).filter(Boolean),
+      room: '',
+    }));
+  }
+
+  async function createSymposium() {
+    collectSymp();
+    const list = syData.sessions.filter((x) => x.title || x.speakers.length);
+    if (!list.length) { say('msg-sy', 'Add at least one session.'); return; }
+    await loadData();
+    const made = K.makeSessionGroups(groups, { event: syData.event || 'Symposium', date: '', sessions: list });
+    try {
+      await saveGroups();
+      say('msg-lib', made.length + ' sessions created for ' + (syData.event || 'Symposium') + '. Pick the session in the floating panel while you record.');
+      resetSymp();
+      show('library');
+      renderLibrary();
+    } catch (e) { say('msg-sy', 'Could not save: ' + errText(e)); }
   }
 
   // ---------------------------------------------------------------- recording view
@@ -399,6 +524,24 @@
 
   $('back').addEventListener('click', (e) => { e.preventDefault(); goBack(); });
   TABS.forEach((t) => $('tab-' + t).addEventListener('click', () => { show(t); if (t === 'library') loadLibrary(); else refresh(); }));
+
+  // New symposium
+  $('b-newsymp').onclick = () => { resetSymp(); show('symp'); };
+  $('sy-pick').addEventListener('change', async () => {
+    const files = Array.from($('sy-pick').files || []);
+    for (const f of files) { try { syImages.push(await shrinkImage(f)); } catch (e) { say('msg-sy', 'Could not read ' + f.name); } }
+    $('sy-pick').value = '';
+    $('sy-imgs').textContent = syImages.length ? syImages.length + (syImages.length === 1 ? ' image' : ' images') + ' added.' : 'No images yet.';
+  });
+  $('sy-reset').onclick = resetSymp;
+  $('sy-read').onclick = readSymposium;
+  $('sy-add').onclick = () => { collectSymp(); syData.sessions.push({ time: '', title: '', speakers: [], room: '' }); renderSymp(); };
+  $('sy-list').addEventListener('click', (e) => {
+    const b = e.target.closest('button[data-rm]');
+    if (!b) return;
+    collectSymp(); syData.sessions.splice(Number(b.dataset.rm), 1); renderSymp();
+  });
+  $('sy-create').onclick = createSymposium;
 
   // Library
   $('b-newgroup').onclick = () => openChooser(true);

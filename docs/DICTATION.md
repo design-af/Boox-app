@@ -69,3 +69,11 @@ Flow: **Live → Prep → Push**, every recording kept in a **Library**.
   - Sleep: a watchdog restarts the speech engine if it goes quiet for 20 s; it also restarts on
     screen-on/unlock; a partial wake lock is held while recording; restarts go through one
     runnable (no duplicate restart chains); Prep ▸ on a stalled engine restarts it.
+- Build 28 — symposium: Library → New symposium: add photos/screenshots of the programme
+  (shrunk to 1568 px JPEG) and/or an event web page link (plugin `fetchPage` downloads it; text is
+  extracted in the page), then "Read with Claude" (`symposiumRequest`, forced tool
+  `report_symposium`). Review/edit event + sessions (time, title, speakers), then Create sessions:
+  one group per session tagged `event`, `eventId`, `order`, `time`, `title`, `speakers`
+  (`makeSessionGroups`). The Library shows each event as a heading with its sessions in order.
+  Panel Live has a "Session" picker (state `sessionId`); Prep ▸ files the segment into that
+  session's group (panel bridge `groups` / `saveGroups`).

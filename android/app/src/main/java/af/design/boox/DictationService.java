@@ -625,6 +625,8 @@ public class DictationService extends Service {
         @JavascriptInterface public String list() { return DictationStore.list(DictationService.this); }
         @JavascriptInterface public String load(String id) { String s = DictationStore.load(DictationService.this, id); return s == null ? "" : s; }
         @JavascriptInterface public boolean save(String id, String json) { return DictationStore.save(DictationService.this, id, json); }
+        @JavascriptInterface public String groups() { return DictationStore.loadGroups(DictationService.this); }
+        @JavascriptInterface public boolean saveGroups(String json) { return DictationStore.saveGroups(DictationService.this, json); }
         @JavascriptInterface public String loadState() { return DictationStore.loadState(DictationService.this); }
         @JavascriptInterface public boolean saveState(String json) { return DictationStore.saveState(DictationService.this, json); }
 

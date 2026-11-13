@@ -18,6 +18,8 @@
   let pending = { end: null, br: false };
   let flagIdx = -1, selWord = null, busy = false, confirmClear = false;
   let splitSel = null;        // { p, i }: "new speaker from this word" (Live or Prep)
+  let sessPick = false;       // session picker open
+  let groupsData = { groups: [] };
   let renameSpk = null;       // speaker id being renamed in Prep
   let badgeShown = null;      // last badge sent to the floating button
   const declaredEarly = [];   // speakers added before the Live recording exists
@@ -93,6 +95,7 @@
     try { st = Object.assign({ liveId: null, prepId: null }, JSON.parse(N.loadState() || '{}')); } catch (e) { }
     live = load(st.liveId);
     prep = load(st.prepId);
+    loadGroups();
     if (!live) st.liveId = null;
     if (!prep) st.prepId = null;
     renderAll();
@@ -221,6 +224,20 @@
     const pop = $('pop');
     const hide = () => { pop.className = ''; pop.innerHTML = ''; };
     const rec = tab === 'live' ? live : prep;
+    if (sessPick && tab === 'live') {
+      let lastEv = null;
+      const items = sessionList().map((g) => {
+        let head = '';
+        if (g.eventId && g.event !== lastEv) { lastEv = g.event; head = '<div class="ev">' + esc(g.event) + '</div>'; }
+        else if (!g.eventId && lastEv !== '__plain') { lastEv = '__plain'; head = '<div class="ev">Groups</div>'; }
+        return head + '<button data-sess="' + esc(g.id) + '"' + (g.id === st.sessionId ? ' class="dark"' : '') + '>' + esc(g.name) + '</button>';
+      }).join('');
+      pop.innerHTML = '<div class="h"><b>Which session is this?</b> <span class="sm">Segments you send to Prep go into it.</span></div>' +
+        '<div class="sesslist">' + items + '</div>' +
+        '<div class="r"><button data-sess="">None</button><button data-act="sesscancel">Cancel</button></div>';
+      pop.className = 'show';
+      return;
+    }
     if (splitSel && rec) {
       const p = K.phraseById(rec, splitSel.p);
       const w = p ? K.words(p.raw)[splitSel.i] : '';
@@ -277,6 +294,9 @@
     $('t-prep').textContent = 'Prep' + (prep ? (prep.flags.length ? ' (' + prep.flags.length + ' ?)' : ' ✓') : '');
     $('confirm-clear').hidden = !confirmClear || tab !== 'live';
     $('act-live').hidden = tab !== 'live' || confirmClear || !!splitSel;
+    $('sess-row').hidden = tab !== 'live' || !groupsData.groups.length;
+    const sg = sessionGroup();
+    $('sess').textContent = 'Session: ' + (sg ? sg.name : 'none') + ' ▾';
     renderSpeakerRow();
     $('act-prep').hidden = tab !== 'prep';
     $('view').textContent = prepView === 'points' ? 'Text' : 'Points';
@@ -292,6 +312,24 @@
   }
   const liveCurrent = () => pending.spk || (live ? K.currentSpeaker(live) : 'A');
   const tagOf = (id) => live ? K.speakerTag(live, id) : (id === '?' ? '?' : id);
+
+  function loadGroups() {
+    try { groupsData = JSON.parse((N.groups && N.groups()) || '{"groups":[]}'); } catch (e) { groupsData = { groups: [] }; }
+    if (!Array.isArray(groupsData.groups)) groupsData.groups = [];
+    if (st.sessionId && !groupsData.groups.some((g) => g.id === st.sessionId)) st.sessionId = null;
+  }
+  const sessionGroup = () => groupsData.groups.find((g) => g.id === st.sessionId) || null;
+
+  /** Sessions in programme order (events first), then other groups by name. */
+  function sessionList() {
+    const ev = groupsData.groups.filter((g) => g.eventId).sort((a, b) => (b.created || 0) - (a.created || 0) || (a.order || 0) - (b.order || 0));
+    const byEvent = new Map();
+    ev.forEach((g) => { if (!byEvent.has(g.eventId)) byEvent.set(g.eventId, []); byEvent.get(g.eventId).push(g); });
+    const out = [];
+    byEvent.forEach((list) => list.sort((a, b) => (a.order || 0) - (b.order || 0)).forEach((g) => out.push(g)));
+    groupsData.groups.filter((g) => !g.eventId).sort((a, b) => a.name.localeCompare(b.name)).forEach((g) => out.push(g));
+    return out;
+  }
 
   function renderSpeakerRow() {
     const row = $('spk-row');
@@ -419,6 +457,7 @@
     confirmClear = false;
     splitSel = null;
     renameSpk = null;
+    sessPick = false;
     selWord = null;
     if (t !== 'prep') flagIdx = -1;
     renderAll();
@@ -454,6 +493,14 @@
     if (!live || !live.phrases.length) { msg('Nothing in Live yet'); return; }
     save(live);
     snapshot('state');
+    const sg = sessionGroup();
+    if (sg) {
+      try {
+        loadGroups();
+        K.assignToGroup(groupsData, sg.id, [live.id]);
+        if (N.saveGroups) N.saveGroups(JSON.stringify(groupsData));
+      } catch (e) { }
+    }
     prep = live;
     st.prepId = live.id;
     live = null;
@@ -570,6 +617,16 @@
 
   function popAction(act, suggIdx, b) {
     const rec = tab === 'live' ? live : prep;
+    if (b && b.dataset.sess != null && sessPick) {
+      st.sessionId = b.dataset.sess || null;
+      saveState();
+      sessPick = false;
+      const sg = sessionGroup();
+      msg(sg ? 'Segments you send to Prep go into “' + sg.name + '”.' : 'No session: segments are not grouped.');
+      renderAll();
+      return;
+    }
+    if (act === 'sesscancel') { sessPick = false; renderAll(); return; }
     if (b && b.dataset.split && splitSel && rec) {
       snapshot(tab === 'live' ? 'live' : 'prep');
       let id = b.dataset.split;
@@ -657,6 +714,7 @@
   $('clear-yes').onclick = () => { confirmClear = false; clearLive(); };
   $('check').onclick = check;
   $('speakers').onclick = speakersCheck;
+  $('sess').onclick = () => { loadGroups(); sessPick = !sessPick; splitSel = null; renderAll(); };
   $('spk-row').addEventListener('click', (e) => {
     const b = e.target.closest('button[data-chip]');
     if (b) markSpeaker(b.dataset.chip);
@@ -723,6 +781,8 @@
       cut() { setTimeout(() => { KB.onPhrase(JSON.stringify({ text: 'and that is the end of the sentence' })); KB.onCut(); }, 300); },
       remove(id) { ls.removeItem('rec:' + id); },
       setBadge(b) { self.badge = b; }, setFocusable() { },
+      groups() { return ls.getItem('groups') || '{"groups":[]}'; },
+      saveGroups(j) { ls.setItem('groups', j); return true; },
       list() {
         const out = [];
         for (let i = 0; i < ls.length; i++) {

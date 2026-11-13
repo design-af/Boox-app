@@ -95,6 +95,15 @@ ol li{margin:0 0 4px}
 .side{flex:none;border:0;border-left:2px solid var(--ink)}
 .empty{color:var(--muted);font-size:.92rem;padding:20px 0}
 
+/* Symposium */
+.filebtn{flex:1 1 auto;display:flex;align-items:center;justify-content:center;min-height:52px;border:2px solid var(--ink);font-weight:600;padding:0 16px}
+.filebtn:active{background:var(--ink);color:var(--paper)}
+.sess{border:2px solid var(--ink);padding:8px;margin-top:10px;display:grid;grid-template-columns:6.5em 1fr;gap:6px;align-items:center}
+.sess input{min-height:44px;width:100%}
+.sess .who{grid-column:1 / -1}
+.sess button{grid-column:1 / -1;min-height:40px}
+.event{margin:22px 0 8px;font-size:1.15rem;font-weight:600;border-bottom:3px solid var(--ink);padding-bottom:4px}
+
 /* Detail views */
 .field{display:block;margin:0 0 6px}
 #d-text{min-height:14em;font-size:.95rem}
@@ -121,6 +130,7 @@ ol li{margin:0 0 4px}
 <!-- ============================== Library ============================== -->
 <section id="v-library" role="tabpanel" aria-labelledby="tab-library">
   <div class="libbar" id="libbar">
+    <button id="b-newsymp" class="primary">New symposium</button>
     <button id="b-newgroup">New group</button>
     <button id="b-select">Select</button>
   </div>
@@ -247,6 +257,35 @@ ol li{margin:0 0 4px}
       <button id="b-raw-clear">Clear…</button>
     </div>
     <p class="msg" id="msg-set" role="status"></p>
+  </div>
+</section>
+
+<!-- ============================== Symposium ============================== -->
+<section id="v-symp" hidden>
+  <div class="group">
+    <h2>1 · From a photo, screenshot or web page</h2>
+    <div class="btns">
+      <label class="filebtn" for="sy-pick">Add photo or screenshot</label>
+      <input type="file" id="sy-pick" accept="image/*" multiple hidden>
+    </div>
+    <span class="hint" id="sy-imgs" style="margin-top:6px">No images yet. Add every page of the programme.</span>
+    <label for="sy-url" class="field" style="margin-top:12px"><b>Or the event’s web page</b></label>
+    <input type="text" id="sy-url" placeholder="https://…" autocomplete="off" autocapitalize="off" spellcheck="false" style="width:100%">
+    <div class="btns">
+      <button id="sy-read" class="primary">Read with Claude</button>
+      <button id="sy-reset">Start over</button>
+    </div>
+    <p class="msg" id="msg-sy" role="status"></p>
+  </div>
+  <div class="group" id="sy-review" hidden>
+    <h2>2 · Check what was read</h2>
+    <label for="sy-event" class="field"><b>Event</b></label>
+    <input type="text" id="sy-event" style="width:100%">
+    <div id="sy-list"></div>
+    <div class="btns">
+      <button id="sy-add">+ Add session</button>
+      <button id="sy-create" class="primary">Create sessions</button>
+    </div>
   </div>
 </section>
 

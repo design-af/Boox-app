@@ -115,4 +115,22 @@ K.dismissSpeakerFlag(sp, u2);
 assert.match(K.plain(sp), /Speaker B: Can i follow up on that\. Yes absolutely next question please\.$/, 'not a change joins previous turn');
 assert.equal(K.speakerRequest(sp, {}, '').tool_choice.name, 'report_speakers');
 
+// Symposium from an agenda.
+const symReq = K.symposiumRequest([{ media_type: 'image/jpeg', data: 'AAAA' }], 'Agenda text', 'https://example.org/agenda');
+assert.equal(symReq.messages[0].content[0].type, 'image');
+assert.match(symReq.messages[0].content[1].text, /Agenda text/);
+const sym = K.parseSymposium({ content: [{ type: 'tool_use', input: { event: 'AEC Tech Day', date: '13 Nov', sessions: [
+  { time: '9:00', title: 'Keynote: BIM at scale', speakers: ['Jane Doe (Perkins&Will)'] },
+  { time: '10:30', title: 'Panel: computation', speakers: ['A. Lee', 'B. Kim'], room: 'Hall B' },
+  { time: '', title: '', speakers: [] },
+] } }] });
+assert.equal(sym.sessions.length, 2);
+const gdata = { groups: [] };
+const made = K.makeSessionGroups(gdata, sym);
+assert.equal(made.length, 2);
+assert.equal(made[0].name, '9:00 · Keynote: BIM at scale');
+assert.equal(made[1].event, 'AEC Tech Day · 13 Nov');
+assert.equal(made[0].eventId, made[1].eventId);
+assert.deepEqual(made[1].speakers, ['A. Lee', 'B. Kim']);
+
 console.log('Dictation: recording logic checks out.');
