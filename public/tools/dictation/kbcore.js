@@ -349,7 +349,7 @@
       system: 'You review live transcripts of talks for speaker changes. Turns already marked show the speaker in brackets, like (A) or (B), at the start of a line; the speaker carries on until the next marked turn. (unknown) marks a turn where the listener knew the voice changed but not who it was.',
       messages: [{ role: 'user', content: contextBlock(ctx) + 'Known speakers: ' + ids.join(', ') + (Object.keys(rec.speakers || {}).filter((k) => rec.speakers[k]).length ? ' (' + ids.map((k) => k + (rec.speakers && rec.speakers[k] ? ' = ' + rec.speakers[k] : '')).join(', ') + ')' : '') +
         '.\n\nTranscript, one numbered line per phrase:\n' + lines +
-        '\n\n1. For every (unknown) turn, say which known speaker it most likely is, or "new" for someone else.\n2. Find places where a different person clearly starts talking that are NOT marked, such as an audience question, a moderator handing over, or a reply. Give the first few words of the new turn exactly as written, and who it is (a known letter or "new"). Only report changes you are fairly sure of.' }],
+        '\n\n1. For every (unknown) turn, say which known speaker it most likely is, or "new" for someone else.\n2. Find places where a different person clearly starts talking that are NOT marked, such as an audience question, a moderator handing over, or a reply. Give the first few words of the new turn exactly as written, and who it is (a known letter or "new"). Only report changes you are fairly sure of.' + useTool('report_speakers') }],
       tools: [{
         name: 'report_speakers',
         description: 'Report who the unknown turns are and where unmarked speaker changes happen.',
@@ -373,15 +373,14 @@
           required: ['changes'],
         },
       }],
-      tool_choice: { type: 'tool', name: 'report_speakers' },
+      tool_choice: { type: 'auto' },
     };
   }
 
   /** Adds Claude's speaker suggestions as speaker questions; returns how many. */
   function applySpeakers(rec, response) {
     const res = typeof response === 'string' ? JSON.parse(response) : response;
-    const block = (res.content || []).find((c) => c.type === 'tool_use');
-    const changes = (block && block.input && block.input.changes) || [];
+    const changes = toolInput(res, 'report_speakers').changes || [];
     unknownTurnFlags(rec);
     let n = 0;
     for (const c of changes) {
@@ -411,6 +410,24 @@
 
   // ---------------------------------------------------------------- Claude
 
+  /**
+   * The structured answer from a reply: the named tool's input, or, if the model answered in
+   * text instead, the first JSON object in that text. Forced tool_choice isn't supported by
+   * every model, so requests leave the choice to the model and ask for the tool in the prompt.
+   */
+  function toolInput(response, name) {
+    const res = typeof response === 'string' ? JSON.parse(response) : response;
+    const blocks = res.content || [];
+    const use = blocks.find((c) => c.type === 'tool_use' && c.name === name) || blocks.find((c) => c.type === 'tool_use');
+    if (use && use.input) return use.input;
+    const text = blocks.filter((c) => c.type === 'text').map((c) => c.text).join('\n');
+    const a = text.indexOf('{'), b = text.lastIndexOf('}');
+    if (a >= 0 && b > a) { try { return JSON.parse(text.slice(a, b + 1)); } catch (e) { } }
+    return {};
+  }
+
+  const useTool = (name) => '\n\nAnswer only by calling the ' + name + ' tool once.';
+
   function contextBlock(ctx) {
     ctx = String(ctx || '').trim();
     return ctx ? 'Context from the listener (topic, names, terms to expect):\n' + ctx + '\n\n' : '';
@@ -421,7 +438,7 @@
     return {
       max_tokens: 4000,
       system: 'You proofread live speech-to-text transcripts of talks and presentations. Find words or short phrases that the speech recogniser probably MISHEARD: wrong homophones, words that make no sense in context, garbled names, products, places or technical terms. Do not flag grammar, style, filler words, missing punctuation or things that are merely informal. Only flag when a different reading is clearly more likely. Copy each quote exactly from the numbered line it is on, keeping it as short as possible.',
-      messages: [{ role: 'user', content: contextBlock(ctx) + 'Transcript, one numbered line per phrase:\n' + lines }],
+      messages: [{ role: 'user', content: contextBlock(ctx) + 'Transcript, one numbered line per phrase:\n' + lines + useTool('report_misheard') }],
       tools: [{
         name: 'report_misheard',
         description: 'Report the words that were probably misheard, with the likely intended words.',
@@ -445,15 +462,14 @@
           required: ['flags'],
         },
       }],
-      tool_choice: { type: 'tool', name: 'report_misheard' },
+      tool_choice: { type: 'auto' },
     };
   }
 
   /** Adds Claude's flags to the recording; returns how many were new. */
   function applyAudit(rec, response) {
     const res = typeof response === 'string' ? JSON.parse(response) : response;
-    const block = (res.content || []).find((c) => c.type === 'tool_use');
-    const flags = (block && block.input && block.input.flags) || [];
+    const flags = toolInput(res, 'report_misheard').flags || [];
     let n = 0;
     for (const f of flags) {
       const ids = [f.line, f.line - 1, f.line + 1];
@@ -553,7 +569,7 @@
       'For each session give the start time as written (or empty), a short title, and the speakers’ names (with their firm or role in brackets when shown). ' +
       'Leave out breaks, lunch and registration unless they have a speaker. Do not invent anything that is not shown.';
     if (pageText) ask += '\n\nText of the web page' + (url ? ' (' + url + ')' : '') + ':\n' + String(pageText).slice(0, 60000);
-    content.push({ type: 'text', text: ask });
+    content.push({ type: 'text', text: ask + useTool('report_symposium') });
     return {
       max_tokens: 4000,
       messages: [{ role: 'user', content }],
@@ -582,14 +598,13 @@
           required: ['event', 'sessions'],
         },
       }],
-      tool_choice: { type: 'tool', name: 'report_symposium' },
+      tool_choice: { type: 'auto' },
     };
   }
 
   function parseSymposium(response) {
     const res = typeof response === 'string' ? JSON.parse(response) : response;
-    const block = (res.content || []).find((c) => c.type === 'tool_use');
-    const d = (block && block.input) || {};
+    const d = toolInput(res, 'report_symposium');
     return {
       event: String(d.event || '').trim() || 'Symposium',
       date: String(d.date || '').trim(),

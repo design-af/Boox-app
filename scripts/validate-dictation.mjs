@@ -54,7 +54,8 @@ assert.ok(K.keyPointsText(r2).startsWith('Key points — BIM at scale\n- One'));
 
 // Requests are well-formed.
 const req = K.auditRequest(rec, {}, 'AEC conference');
-assert.equal(req.tool_choice.name, 'report_misheard');
+assert.equal(req.tools[0].name, 'report_misheard');
+assert.equal(req.tool_choice.type, 'auto', 'no forced tool (unsupported by some models)');
 assert.match(req.messages[0].content, /AEC conference/);
 assert.ok(K.summaryRequest(rec, {}, '').messages[0].content.includes('Title:'));
 
@@ -113,7 +114,10 @@ const u2 = sp.flags.find((f) => f.kind === 'spk' && f.unknown);
 assert.deepEqual(u2.sugg, ['A']);
 K.dismissSpeakerFlag(sp, u2);
 assert.match(K.plain(sp), /Speaker B: Can i follow up on that\. Yes absolutely next question please\.$/, 'not a change joins previous turn');
-assert.equal(K.speakerRequest(sp, {}, '').tool_choice.name, 'report_speakers');
+assert.equal(K.speakerRequest(sp, {}, '').tools[0].name, 'report_speakers');
+// A model that answers in text instead of the tool still works.
+const textSym = K.parseSymposium({ content: [{ type: 'text', text: 'Here you go:\n{"event":"Day","sessions":[{"time":"9:00","title":"Opening","speakers":["X"]}]}' }] });
+assert.equal(textSym.sessions[0].title, 'Opening');
 
 // Symposium from an agenda.
 const symReq = K.symposiumRequest([{ media_type: 'image/jpeg', data: 'AAAA' }], 'Agenda text', 'https://example.org/agenda');
