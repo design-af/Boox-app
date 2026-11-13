@@ -1,6 +1,11 @@
-// Aside Transcribe app page. Tabs: Library (recordings, grouped; key points per group),
-// Setup (floating button + permissions + how it flows), Settings. Detail views for a group and
-// a recording. Native side: DictationPlugin. Shared logic: kbcore.js.
+// Aside Transcribe app page.
+// Tabs: Library, Setup, Settings. The Library drills down one level per screen:
+//   Library home  → Unsorted (recordings in no session/group; assign or delete them)
+//                 → a Symposium (rename, sessions in order, add session, delete)
+//                     → a Session (time/title/speakers, recordings, key points, delete)
+//                 → a Group (same as a session, with a name instead of time/title/speakers)
+//   any recording → Recording page (edit text, key points, move, Prep, delete)
+// Native side: DictationPlugin. Shared logic: kbcore.js.
 (function () {
   'use strict';
   const K = window.KBCore;
@@ -14,21 +19,26 @@
 
   let status = null;
   let settingsLoaded = false;
-  let items = [];               // recording metadata from native list
-  let groups = { groups: [] };  // groups.json
-  let st = {};                  // { liveId, prepId }
-  let view = 'library';         // library | setup | settings | group | rec
-  let selecting = false;
-  const picked = new Set();
-  let currentGroup = null;      // group open in the group view
-  let current = null;           // recording open in the recording view
-  let recFrom = 'library';      // where Back from a recording goes
-  let syImages = [];            // [{ media_type, data }] for New symposium
-  let syData = null;            // what Claude read: { event, date, sessions }
+  let items = [];                              // recording metadata from the native list
+  let data = { groups: [], events: [] };       // groups.json
+  let st = {};                                 // { liveId, prepId, sessionId }
+
+  // Navigation: the current screen plus a stack to go back through.
+  let view = 'library';
+  let viewId = null;                           // event / group / recording id for the screen
+  const stack = [];
+  let current = null;                          // recording open on the Recording screen
+  let assignIds = [];                          // recordings being assigned
+  let uSelecting = false;
+  const uPicked = new Set();
+  const pPicked = new Set();
+  let syImages = [];
+  let syData = null;
 
   const opts = () => ({ cap: !status || status.settings.cap !== false, autoPeriod: !status || status.settings.autoPeriod !== false });
   const context = () => (status && status.settings.context) || '';
   const hasKey = () => !!(status && status.settings.hasKey);
+  const plural = (n, one, many) => n + ' ' + (n === 1 ? one : many);
 
   function when(t, withYear) {
     const d = new Date(t);
@@ -38,297 +48,237 @@
   const dayKey = (t) => new Date(t).toDateString();
   const dayLabel = (t) => new Date(t).toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' });
 
-  // ---------------------------------------------------------------- views
-
-  const TABS = ['library', 'setup', 'settings'];
-  function show(v) {
-    view = v;
-    $('tabs').hidden = !TABS.includes(v);
-    TABS.forEach((t) => {
-      $('v-' + t).hidden = v !== t;
-      $('tab-' + t).setAttribute('aria-selected', String(v === t));
-    });
-    $('v-group').hidden = v !== 'group';
-    $('v-symp').hidden = v !== 'symp';
-    $('v-rec').hidden = v !== 'rec';
-    if (TABS.includes(v)) {
-      $('heading').textContent = 'Aside Transcribe';
-      $('back').textContent = '← Tools';
-    } else if (v === 'group') {
-      $('heading').textContent = currentGroup && currentGroup.event ? 'Session' : 'Group';
-      $('back').textContent = '← Library';
-    } else if (v === 'symp') {
-      $('heading').textContent = 'New symposium';
-      $('back').textContent = '← Library';
-    } else {
-      $('heading').textContent = 'Recording';
-      $('back').textContent = recFrom === 'group' ? '← Group' : '← Library';
-    }
-    $('middle').scrollTop = 0;
-    const hash = v === 'group' && currentGroup ? '#group=' + currentGroup.id : v === 'rec' && current ? '#rec=' + current.id : '#' + v;
-    if (location.hash !== hash) history.replaceState(null, '', hash);
-  }
-
-  function goBack() {
-    if (view === 'rec') {
-      current = null;
-      if (recFrom === 'group' && currentGroup) { openGroup(currentGroup.id); return; }
-      show('library'); loadLibrary(); return;
-    }
-    if (view === 'group' || view === 'symp') { currentGroup = null; show('library'); loadLibrary(); return; }
-    location.href = '../../index.html';
-  }
-
-  // ---------------------------------------------------------------- setup + settings
-
-  function mark(stepId, done, n) {
-    $(stepId).classList.toggle('done', !!done);
-    $(stepId).querySelector('.mark').textContent = done ? '✓' : n;
-  }
-
-  function render(s) {
-    status = s;
-    mark('s-mic', s.mic, 1);
-    $('b-mic').textContent = s.mic ? 'Allowed' : 'Allow';
-    $('b-mic').disabled = !!s.mic;
-    mark('s-eng', s.recognizer, 2);
-    $('h-eng').textContent = s.recognizer
-      ? (s.onDevice ? 'Found, including on-device (works offline).' : 'Found (online; needs Wi-Fi or a hotspot).')
-      : 'None found. Install the Google app or “Speech Recognition & Synthesis from Google”.';
-    mark('s-ovl', s.overlay, 3);
-    $('b-ovl').textContent = s.overlay ? 'Allowed' : 'Allow';
-    $('b-ovl').disabled = !!s.overlay;
-    mark('s-acc', s.accessibility, 4);
-    mark('s-key', s.settings.hasKey, 5);
-    $('h-key').textContent = s.settings.hasKey ? 'Saved on this tablet. Paste a new one to replace it.' : 'Stored only on this tablet. From console.anthropic.com.';
-    $('b-bubble').textContent = s.bubble ? 'Hide floating button' : 'Show floating button';
-    $('b-bubble').classList.toggle('primary', !s.bubble);
-    if (!settingsLoaded) {
-      settingsLoaded = true;
-      const t = s.settings;
-      $('engine').value = t.engine || 'auto';
-      $('mute').checked = t.mute !== false;
-      $('cap').checked = t.cap !== false;
-      $('autoPeriod').checked = t.autoPeriod !== false;
-      $('lang').value = t.lang || '';
-      $('model').value = t.model || 'claude-sonnet-5-5';
-      $('context').value = t.context || '';
-    }
-  }
-
-  async function refresh() {
-    try { render(await call('status')); } catch (e) { say('msg-set', 'Status failed: ' + errText(e)); }
-  }
-
-  async function saveSettings(extra) {
-    try {
-      render(await call('setSettings', Object.assign({
-        engine: $('engine').value, mute: $('mute').checked, cap: $('cap').checked, autoPeriod: $('autoPeriod').checked,
-        lang: $('lang').value.trim(), model: $('model').value, context: $('context').value,
-      }, extra || {})));
-      say('msg-set', 'Saved.');
-    } catch (e) { say('msg-set', 'Save failed: ' + errText(e)); }
-  }
-
   // ---------------------------------------------------------------- data
 
   async function loadData() {
     try { items = JSON.parse((await call('list')).json || '[]'); } catch (e) { items = []; }
-    try { groups = JSON.parse((await call('groups')).json || '{"groups":[]}'); } catch (e) { groups = { groups: [] }; }
+    try { data = JSON.parse((await call('groups')).json || '{"groups":[]}'); } catch (e) { data = { groups: [] }; }
     try { st = JSON.parse((await call('state')).json || '{}'); } catch (e) { st = {}; }
-    if (!Array.isArray(groups.groups)) groups.groups = [];
-    // Drop group entries for recordings that no longer exist.
+    if (!Array.isArray(data.groups)) data.groups = [];
+    K.ensureEvents(data);
     const ids = new Set(items.map((m) => m.id));
-    groups.groups.forEach((g) => { g.ids = (g.ids || []).filter((id) => ids.has(id)); });
+    data.groups.forEach((g) => { g.ids = (g.ids || []).filter((id) => ids.has(id)); });
   }
-  const saveGroups = () => call('saveGroups', { json: JSON.stringify(groups) });
+  const saveGroups = () => call('saveGroups', { json: JSON.stringify(data) });
   const meta = (id) => items.find((m) => m.id === id);
+  const groupById = (id) => data.groups.find((g) => g.id === id) || null;
+  const eventById = (id) => data.events.find((e) => e.id === id) || null;
+  const unsorted = () => K.unsortedIds(data, items.map((m) => m.id)).map(meta).filter(Boolean);
+  const recCount = (gs) => gs.reduce((n, g) => n + g.ids.length, 0);
   async function loadRec(id) { return JSON.parse((await call('load', { id })).json); }
 
-  function groupOptions(selected) {
-    return '<option value="">Not grouped</option>' +
-      groups.groups.map((x) => '<option value="' + esc(x.id) + '"' + (x.id === selected ? ' selected' : '') + '>' + esc(x.name) + '</option>').join('') +
-      '<option value="__new">New group…</option>';
-  }
-
-  // ---------------------------------------------------------------- library
-
-  function rowHtml(m, o) {
-    const bits = [when(m.created || m.updated), m.words + ' words'];
-    if (m.hasSummary) bits.push('key points');
-    if (m.flags) bits.push(m.flags + ' to review');
-    if (m.pushed) bits.push('pushed ✓');
-    const where = m.id === st.liveId ? 'LIVE · ' : m.id === st.prepId ? 'IN PREP · ' : '';
-    const sel = selecting && !(o && o.noSelect);
-    const isPicked = picked.has(m.id);
-    return '<li class="' + (sel && isPicked ? 'picked' : '') + '"><button class="rowbtn" data-id="' + esc(m.id) + '"' +
-      (sel ? ' aria-pressed="' + isPicked + '"' : '') + '>' +
-      (sel ? '<span class="box" aria-hidden="true">' + (isPicked ? '✓' : '') + '</span>' : '') +
-      '<span class="meta"><span class="t">' + esc(m.title || K.defaultTitle({ created: m.created })) + '</span><span class="m">' + where + bits.join(' · ') + '</span></span></button>' +
-      (o && o.remove ? '<button class="side" data-remove="' + esc(m.id) + '">Remove</button>' : '') + '</li>';
-  }
-
-  function renderLibrary() {
-    const out = [];
-    const byGroup = new Set();
-    // Events (from New symposium) first, newest first, their sessions in programme order; then other groups.
-    const events = new Map();
-    groups.groups.filter((g) => g.eventId).forEach((g) => {
-      if (!events.has(g.eventId)) events.set(g.eventId, { name: g.event, created: g.created, list: [] });
-      events.get(g.eventId).list.push(g);
-    });
-    const evs = Array.from(events.values()).sort((a, b) => (b.created || 0) - (a.created || 0));
-    const plain = groups.groups.filter((g) => !g.eventId).sort((a, b) => (b.updated || 0) - (a.updated || 0));
-    const gs = [];
-    const heads = new Map();
-    evs.forEach((e) => { e.list.sort((a, b) => (a.order || 0) - (b.order || 0)); e.list.forEach((g, i) => { if (i === 0) heads.set(g.id, e.name); gs.push(g); }); });
-    plain.forEach((g) => gs.push(g));
-    let plainHead = false;
-    for (const g of gs) {
-      if (heads.has(g.id)) out.push('<div class="event">' + esc(heads.get(g.id)) + '</div>');
-      else if (!g.eventId && evs.length && !plainHead) { plainHead = true; out.push('<div class="event">Groups</div>'); }
-      const ms = g.ids.map(meta).filter(Boolean).sort((a, b) => (a.created || 0) - (b.created || 0));
-      ms.forEach((m) => byGroup.add(m.id));
-      const words = ms.reduce((n, m) => n + (m.words || 0), 0);
-      const info = [ms.length + (ms.length === 1 ? ' recording' : ' recordings'), words + ' words'];
-      if (g.summary) info.push('key points ✓');
-      if (g.speakers && g.speakers.length) info.unshift(g.speakers.join(', '));
-      out.push('<section class="grp"><div class="grp-h"><button class="open" data-group="' + esc(g.id) + '"><span class="t">' + esc(g.name) +
-        '</span><span class="m">' + info.join(' · ') + '</span></button><button class="kp" data-kp="' + esc(g.id) + '">Key points</button></div>' +
-        (ms.length ? '<ul class="lib">' + ms.map((m) => rowHtml(m)).join('') + '</ul>' : '<p class="empty" style="padding:12px">Empty. Select recordings, then Add to group.</p>') +
-        '</section>');
-    }
-    // Everything not in a group, by day.
-    const loose = items.filter((m) => !byGroup.has(m.id)).sort((a, b) => (b.created || 0) - (a.created || 0));
-    let day = null;
-    let buf = [];
-    const flush = () => { if (buf.length) { out.push('<ul class="lib">' + buf.join('') + '</ul>'); buf = []; } };
-    for (const m of loose) {
-      const k = dayKey(m.created || m.updated);
-      if (k !== day) { flush(); day = k; out.push('<div class="day">' + esc(dayLabel(m.created || m.updated)) + (groups.groups.length ? ' · not grouped' : '') + '</div>'); }
-      buf.push(rowHtml(m));
-    }
-    flush();
-    if (!items.length) out.push('<p class="empty">No recordings yet. Show the floating button (Setup), tap it, and tap Start.</p>');
-    $('lib').innerHTML = out.join('');
-    $('selcount').textContent = picked.size + ' selected';
-    ['b-addto', 'b-ungroup', 'b-delsel'].forEach((id) => { $(id).disabled = picked.size === 0; });
-  }
-
-  async function loadLibrary() {
-    await loadData();
-    picked.forEach((id) => { if (!meta(id)) picked.delete(id); });
-    renderLibrary();
-  }
-
-  function setSelecting(on) {
-    selecting = on;
-    if (!on) picked.clear();
-    $('libbar').hidden = on;
-    $('selbar').hidden = !on;
-    $('chooser').hidden = true;
-    renderLibrary();
-  }
-
-  function openChooser(forNew) {
-    const sel = $('ch-group');
-    sel.innerHTML = groups.groups.map((g) => '<option value="' + esc(g.id) + '">' + esc(g.name) + '</option>').join('') +
-      '<option value="__new">New group…</option>';
-    sel.value = forNew || !groups.groups.length ? '__new' : groups.groups[0].id;
-    $('ch-name').value = '';
-    $('ch-name').hidden = sel.value !== '__new';
-    $('ch-title').textContent = forNew ? 'New group' : 'Add ' + picked.size + ' to group';
-    $('ch-ok').textContent = forNew && !picked.size ? 'Create' : 'Add';
-    $('chooser').hidden = false;
-    if (sel.value === '__new') $('ch-name').focus();
-  }
-
-  async function chooserOk() {
-    let gid = $('ch-group').value;
-    if (gid === '__new') {
-      const g = K.newGroup($('ch-name').value || 'Group ' + (groups.groups.length + 1));
-      groups.groups.push(g);
-      gid = g.id;
-    }
-    if (picked.size) K.assignToGroup(groups, gid, Array.from(picked));
-    try { await saveGroups(); } catch (e) { say('msg-lib', 'Could not save: ' + errText(e)); return; }
-    $('chooser').hidden = true;
-    if (selecting) setSelecting(false); else renderLibrary();
-    say('msg-lib', 'Saved.');
-  }
-
-  let delArmedSel = 0;
-  async function deleteSelected() {
-    if (Date.now() - delArmedSel > 4000) { delArmedSel = Date.now(); $('b-delsel').textContent = 'Tap again to delete'; return; }
-    $('b-delsel').textContent = 'Delete…';
-    const ids = Array.from(picked);
+  async function removeRecordings(ids) {
+    st = JSON.parse((await call('state')).json || '{}');
     for (const id of ids) {
       if (st.liveId === id) st.liveId = null;
       if (st.prepId === id) st.prepId = null;
       try { await call('remove', { id }); } catch (e) { }
     }
-    K.removeFromGroups(groups, ids);
+    K.removeFromGroups(data, ids);
     await saveGroups();
     await call('setState', { json: JSON.stringify(st) });
-    say('msg-lib', ids.length + ' deleted.');
-    setSelecting(false);
-    loadLibrary();
   }
 
-  // ---------------------------------------------------------------- group view
+  // ---------------------------------------------------------------- navigation
 
-  function openGroup(id, generate) {
-    currentGroup = groups.groups.find((g) => g.id === id);
-    if (!currentGroup) { show('library'); return; }
-    $('g-name').value = currentGroup.name;
-    $('g-points').value = currentGroup.summary || '';
-    $('g-delete').textContent = 'Delete group…';
-    say('msg-g', '');
-    renderGroupList();
-    show('group');
-    if (generate && !currentGroup.summary) groupKeyPoints();
+  const SECTIONS = ['library', 'setup', 'settings', 'unsorted', 'event', 'group', 'assign', 'pick', 'symp', 'rec'];
+  const TABS = ['library', 'setup', 'settings'];
+  const TITLES = { unsorted: 'Unsorted', event: 'Symposium', assign: 'Assign to…', pick: 'Add recordings', symp: 'New symposium', rec: 'Recording' };
+
+  function show(v, id) {
+    view = v;
+    viewId = id == null ? null : id;
+    $('tabs').hidden = !TABS.includes(v);
+    SECTIONS.forEach((x) => { $('v-' + x).hidden = x !== v; });
+    TABS.forEach((t) => $('tab-' + t).setAttribute('aria-selected', String(v === t)));
+    if (TABS.includes(v)) { $('heading').textContent = 'Aside Transcribe'; $('back').textContent = '← Tools'; }
+    else {
+      const g = v === 'group' ? groupById(viewId) : null;
+      $('heading').textContent = v === 'group' ? (g && g.eventId ? 'Session' : 'Group') : TITLES[v];
+      $('back').textContent = '← Back';
+    }
+    $('middle').scrollTop = 0;
+    const hash = v === 'rec' && viewId ? '#rec=' + viewId : TABS.includes(v) ? '#' + v : location.hash;
+    if (location.hash !== hash) history.replaceState(null, '', hash);
+    render();
   }
 
-  function renderGroupList() {
-    const ms = currentGroup.ids.map(meta).filter(Boolean).sort((a, b) => (a.created || 0) - (b.created || 0));
-    const words = ms.reduce((n, m) => n + (m.words || 0), 0);
-    $('g-meta').textContent = (currentGroup.event ? currentGroup.event + ' · ' : '') +
-      (currentGroup.speakers && currentGroup.speakers.length ? currentGroup.speakers.join(', ') + ' · ' : '') +
-      ms.length + (ms.length === 1 ? ' recording' : ' recordings') + ' · ' + words + ' words' +
-      (currentGroup.title && currentGroup.title !== currentGroup.name ? ' · suggested title: ' + currentGroup.title : '');
-    $('g-list').innerHTML = ms.length ? ms.map((m) => rowHtml(m, { noSelect: true, remove: true })).join('') : '<li><p class="empty" style="padding:12px">No recordings. In the Library, Select some and Add to group.</p></li>';
-    $('g-gen').disabled = !ms.length;
+  /** Opens a screen, remembering where we came from. */
+  function go(v, id) {
+    stack.push({ v: view, id: viewId });
+    show(v, id);
   }
 
-  async function groupRecs() {
+  async function back() {
+    if (view === 'rec') current = null;
+    const prev = stack.pop();
+    if (!prev) { location.href = '../../index.html'; return; }
+    await loadData();
+    show(prev.v, prev.id);
+  }
+
+  function render() {
+    if (view === 'library') renderHome();
+    else if (view === 'unsorted') renderUnsorted();
+    else if (view === 'event') renderEvent();
+    else if (view === 'group') renderGroup();
+    else if (view === 'assign') renderAssign();
+    else if (view === 'pick') renderPick();
+  }
+
+  // ---------------------------------------------------------------- rows
+
+  function recRow(m, o) {
+    o = o || {};
+    const bits = [when(m.created || m.updated), m.words + ' words'];
+    if (m.hasSummary) bits.push('key points');
+    if (m.flags) bits.push(m.flags + ' to review');
+    if (m.pushed) bits.push('pushed ✓');
+    const where = m.id === st.liveId ? 'LIVE · ' : m.id === st.prepId ? 'IN PREP · ' : '';
+    const sel = !!o.select;
+    const on = sel && o.picked && o.picked.has(m.id);
+    return '<li class="' + (on ? 'picked' : '') + '"><button class="rowbtn" data-id="' + esc(m.id) + '"' + (sel ? ' aria-pressed="' + on + '"' : '') + '>' +
+      (sel ? '<span class="box" aria-hidden="true">' + (on ? '✓' : '') + '</span>' : '') +
+      '<span class="meta"><span class="t">' + esc(m.title || K.defaultTitle({ created: m.created })) + '</span><span class="m">' + where + bits.join(' · ') + '</span></span></button>' +
+      (o.assign ? '<button class="side" data-assign="' + esc(m.id) + '">Assign</button>' : '') +
+      (o.remove ? '<button class="side" data-remove="' + esc(m.id) + '">Remove</button>' : '') + '</li>';
+  }
+
+  function navRow(attr, id, title, sub) {
+    return '<li><button class="rowbtn" ' + attr + '="' + esc(id) + '"><span class="meta"><span class="t">' + esc(title) +
+      '</span><span class="m">' + esc(sub) + '</span></span><span class="chev" aria-hidden="true">›</span></button></li>';
+  }
+
+  // ---------------------------------------------------------------- Library home
+
+  function renderHome() {
     const out = [];
-    for (const id of currentGroup.ids) { try { out.push(await loadRec(id)); } catch (e) { } }
-    return out;
+    const u = unsorted();
+    const newest = u.reduce((t, m) => Math.max(t, m.created || 0), 0);
+    out.push('<ul class="lib boxed inbox" style="margin-top:4px">' + navRow('data-nav', 'unsorted', 'Unsorted',
+      u.length ? plural(u.length, 'recording', 'recordings') + ' not in a session · newest ' + when(newest) : 'Nothing to sort') + '</ul>');
+
+    const evs = data.events.slice().sort((a, b) => (b.created || 0) - (a.created || 0));
+    out.push('<div class="home-h">Symposiums</div>');
+    if (evs.length) {
+      out.push('<ul class="lib boxed">' + evs.map((e) => {
+        const ss = K.eventSessions(data, e.id);
+        return navRow('data-event', e.id, e.name, plural(ss.length, 'session', 'sessions') + ' · ' + plural(recCount(ss), 'recording', 'recordings'));
+      }).join('') + '</ul>');
+    } else out.push('<p class="empty">None yet. Tap New symposium to set one up from a programme, or type it in.</p>');
+
+    const plain = data.groups.filter((g) => !g.eventId).sort((a, b) => (b.updated || 0) - (a.updated || 0));
+    if (plain.length) {
+      out.push('<div class="home-h">Groups</div><ul class="lib boxed">' + plain.map((g) =>
+        navRow('data-group', g.id, g.name, plural(g.ids.length, 'recording', 'recordings') + (g.summary ? ' · key points ✓' : ''))).join('') + '</ul>');
+    }
+    $('lib-home').innerHTML = out.join('');
+  }
+
+  // ---------------------------------------------------------------- Unsorted
+
+  function renderUnsorted() {
+    const u = unsorted().sort((a, b) => (b.created || 0) - (a.created || 0));
+    $('u-count').textContent = u.length ? plural(u.length, 'recording', 'recordings') : '';
+    $('u-bar').hidden = uSelecting;
+    $('u-selbar').hidden = !uSelecting;
+    $('u-selcount').textContent = uPicked.size + ' selected';
+    $('u-assign').disabled = $('u-delete').disabled = uPicked.size === 0;
+    if (!u.length) { $('u-list').innerHTML = '<p class="empty">Everything is in a session or group.</p>'; return; }
+    const out = [];
+    let day = null, buf = [];
+    const flush = () => { if (buf.length) { out.push('<ul class="lib boxed">' + buf.join('') + '</ul>'); buf = []; } };
+    for (const m of u) {
+      const k = dayKey(m.created || m.updated);
+      if (k !== day) { flush(); day = k; out.push('<div class="day">' + esc(dayLabel(m.created || m.updated)) + '</div>'); }
+      buf.push(recRow(m, uSelecting ? { select: true, picked: uPicked } : { assign: true }));
+    }
+    flush();
+    $('u-list').innerHTML = out.join('');
+  }
+
+  // ---------------------------------------------------------------- Symposium
+
+  function renderEvent() {
+    const e = eventById(viewId);
+    if (!e) { $('e-list').innerHTML = ''; return; }
+    if (document.activeElement !== $('e-name')) $('e-name').value = e.name;
+    const ss = K.eventSessions(data, e.id);
+    $('e-meta').textContent = plural(ss.length, 'session', 'sessions') + ' · ' + plural(recCount(ss), 'recording', 'recordings');
+    $('e-list').innerHTML = ss.length ? ss.map((g) => {
+      const sub = [];
+      if (g.speakers && g.speakers.length) sub.push(g.speakers.join(', '));
+      sub.push(plural(g.ids.length, 'recording', 'recordings'));
+      if (g.summary) sub.push('key points ✓');
+      return navRow('data-group', g.id, g.name, sub.join(' · '));
+    }).join('') : '<li><p class="empty" style="padding:12px">No sessions yet. Tap + Add session.</p></li>';
+    $('e-delete').textContent = 'Delete symposium…';
+  }
+
+  // ---------------------------------------------------------------- Session / group
+
+  function renderGroup() {
+    const g = groupById(viewId);
+    if (!g) return;
+    const isSession = !!g.eventId;
+    $('g-session-fields').hidden = !isSession;
+    $('g-group-fields').hidden = isSession;
+    if (isSession) {
+      const e = eventById(g.eventId);
+      $('g-event').textContent = e ? e.name : '';
+      if (document.activeElement !== $('g-time')) $('g-time').value = g.time || '';
+      if (document.activeElement !== $('g-title')) $('g-title').value = g.title || '';
+      if (document.activeElement !== $('g-speakers')) $('g-speakers').value = (g.speakers || []).join(', ');
+    } else if (document.activeElement !== $('g-name')) $('g-name').value = g.name;
+    if (document.activeElement !== $('g-points')) $('g-points').value = g.summary || '';
+    const ms = g.ids.map(meta).filter(Boolean).sort((a, b) => (a.created || 0) - (b.created || 0));
+    const words = ms.reduce((n, m) => n + (m.words || 0), 0);
+    $('g-meta').textContent = ms.length ? '· ' + plural(ms.length, 'recording', 'recordings') + ' · ' + words + ' words' : '';
+    $('g-list').innerHTML = ms.length ? ms.map((m) => recRow(m, { remove: true })).join('') : '<li><p class="empty" style="padding:12px">None yet. Tap + Add recordings, or send segments here from the floating panel’s Session picker.</p></li>';
+    $('g-gen').disabled = !ms.length;
+    $('g-delete').textContent = isSession ? 'Delete session…' : 'Delete group…';
+  }
+
+  async function saveSessionFields() {
+    const g = groupById(viewId);
+    if (!g) return;
+    if (g.eventId) K.updateSession(g, { time: $('g-time').value, title: $('g-title').value, speakers: $('g-speakers').value });
+    else { g.name = $('g-name').value.trim() || g.name; g.updated = Date.now(); }
+    await saveGroups();
+    say('msg-g', 'Saved.');
+  }
+
+  async function groupRecs(g) {
+    const out = [];
+    for (const id of g.ids) { try { out.push(await loadRec(id)); } catch (e) { } }
+    return out.sort((a, b) => (a.created || 0) - (b.created || 0));
   }
 
   async function groupKeyPoints() {
-    const g = currentGroup;
+    const g = groupById(viewId);
+    if (!g) return;
     if (!hasKey()) { say('msg-g', 'Key points need a Claude API key (Settings tab).'); return; }
     $('g-gen').disabled = true;
-    say('msg-g', 'Writing key points for ' + g.ids.length + ' recordings…');
+    say('msg-g', 'Writing key points for ' + plural(g.ids.length, 'recording', 'recordings') + '…');
     try {
-      const recs = await groupRecs();
-      if (!recs.length) throw new Error('no recordings in this group');
+      const recs = await groupRecs(g);
+      if (!recs.length) throw new Error('no recordings here yet');
       const res = (await call('claude', { body: JSON.stringify(K.groupSummaryRequest(g.name, recs, opts(), context())) })).json;
-      g.title = '';
+      const t = g.title;
       K.applySummary(g, res);
+      if (g.eventId) g.title = t; // sessions keep their programme title
       g.updated = Date.now();
       await saveGroups();
-      if (currentGroup === g) { $('g-points').value = g.summary; renderGroupList(); }
+      if (view === 'group' && viewId === g.id) $('g-points').value = g.summary;
       say('msg-g', 'Key points written and saved.');
     } catch (e) { say('msg-g', 'Key points failed: ' + errText(e)); }
     $('g-gen').disabled = false;
   }
 
   async function groupToPrep() {
-    const g = currentGroup;
+    const g = groupById(viewId);
     const text = $('g-points').value.trim();
-    if (!text) { say('msg-g', 'No key points yet.'); return; }
+    if (!g || !text) { say('msg-g', 'No key points yet.'); return; }
     g.summary = text;
     const rec = K.newRecording();
     rec.title = 'Key points — ' + g.name;
@@ -336,27 +286,140 @@
     rec.summary = text;
     try {
       await call('save', { id: rec.id, json: JSON.stringify(rec) });
-      K.assignToGroup(groups, g.id, [rec.id]);
+      K.assignToGroup(data, g.id, [rec.id]);
       await saveGroups();
       st = JSON.parse((await call('state')).json || '{}');
       st.prepId = rec.id;
       await call('setState', { json: JSON.stringify(st) });
       await loadData();
-      currentGroup = groups.groups.find((x) => x.id === g.id);
-      renderGroupList();
+      renderGroup();
       say('msg-g', 'In Prep. Open the floating panel, tap into your notes and Push.');
     } catch (e) { say('msg-g', 'Failed: ' + errText(e)); }
   }
 
-  async function groupAllText() {
-    const recs = (await groupRecs()).sort((a, b) => (a.created || 0) - (b.created || 0));
-    const parts = [currentGroup.name];
+  async function groupAllText(g) {
+    const parts = [g.name];
     if ($('g-points').value.trim()) parts.push('Key points\n' + $('g-points').value.trim());
-    for (const r of recs) parts.push(K.titleOf(r) + '\n' + K.plain(r, opts()));
+    for (const r of await groupRecs(g)) parts.push(K.titleOf(r) + '\n' + K.plain(r, opts()));
     return parts.join('\n\n');
   }
 
-  // ---------------------------------------------------------------- new symposium
+  // ---------------------------------------------------------------- Assign / pick
+
+  function renderAssign() {
+    $('a-what').textContent = 'Assign ' + plural(assignIds.length, 'recording', 'recordings') + ' to:';
+    const out = [];
+    const evs = data.events.slice().sort((a, b) => (b.created || 0) - (a.created || 0));
+    evs.forEach((e) => {
+      const ss = K.eventSessions(data, e.id);
+      if (!ss.length) return;
+      out.push('<div class="assign-ev">' + esc(e.name) + '</div><div class="dest">' +
+        ss.map((g) => '<button data-to="' + esc(g.id) + '">' + esc(g.name) + (g.speakers && g.speakers.length ? '<span class="m">' + esc(g.speakers.join(', ')) + '</span>' : '') + '</button>').join('') + '</div>');
+    });
+    const plain = data.groups.filter((g) => !g.eventId).sort((a, b) => a.name.localeCompare(b.name));
+    if (plain.length) out.push('<div class="assign-ev">Groups</div><div class="dest">' + plain.map((g) => '<button data-to="' + esc(g.id) + '">' + esc(g.name) + '</button>').join('') + '</div>');
+    if (!out.length) out.push('<p class="empty">No sessions or groups yet. Make a new group below, or set up a symposium.</p>');
+    $('a-list').innerHTML = out.join('');
+    $('a-newname').value = '';
+    say('msg-a', '');
+  }
+
+  async function assignTo(gid) {
+    const g = groupById(gid);
+    if (!g) return;
+    K.assignToGroup(data, gid, assignIds);
+    await saveGroups();
+    const n = assignIds.length;
+    assignIds = [];
+    uPicked.clear();
+    uSelecting = false;
+    await back();
+    const id = view === 'unsorted' ? 'msg-u' : view === 'rec' ? 'msg-d' : 'msg-lib';
+    say(id, plural(n, 'recording', 'recordings') + ' assigned to “' + g.name + '”.');
+  }
+
+  function renderPick() {
+    const u = unsorted().sort((a, b) => (b.created || 0) - (a.created || 0));
+    $('p-list').innerHTML = u.length ? u.map((m) => recRow(m, { select: true, picked: pPicked })).join('') : '<li><p class="empty" style="padding:12px">Nothing in Unsorted.</p></li>';
+    $('p-ok').textContent = pPicked.size ? 'Add ' + pPicked.size : 'Add';
+    $('p-ok').disabled = !pPicked.size;
+  }
+
+  // ---------------------------------------------------------------- Recording
+
+  function groupSelectHtml(selected) {
+    const out = ['<option value="">Unsorted</option>'];
+    data.events.slice().sort((a, b) => (b.created || 0) - (a.created || 0)).forEach((e) => {
+      const ss = K.eventSessions(data, e.id);
+      if (!ss.length) return;
+      out.push('<optgroup label="' + esc(e.name) + '">' + ss.map((g) => '<option value="' + esc(g.id) + '"' + (g.id === selected ? ' selected' : '') + '>' + esc(g.name) + '</option>').join('') + '</optgroup>');
+    });
+    const plain = data.groups.filter((g) => !g.eventId);
+    if (plain.length) out.push('<optgroup label="Groups">' + plain.map((g) => '<option value="' + esc(g.id) + '"' + (g.id === selected ? ' selected' : '') + '>' + esc(g.name) + '</option>').join('') + '</optgroup>');
+    out.push('<option value="__new">New group…</option>');
+    return out.join('');
+  }
+
+  async function openRec(id) {
+    let rec;
+    try { rec = await loadRec(id); } catch (e) { say('msg-lib', 'Could not open recording: ' + errText(e)); return; }
+    current = rec;
+    go('rec', id);
+    $('d-title').value = current.title || '';
+    $('d-title').placeholder = K.defaultTitle(current);
+    $('d-text').value = K.plain(current, opts());
+    $('d-text').dataset.orig = $('d-text').value;
+    $('d-points').value = current.summary || '';
+    const g = K.groupOf(data, current.id);
+    $('d-group').innerHTML = groupSelectHtml(g ? g.id : '');
+    $('d-newgroup').hidden = true;
+    $('d-newgroup').value = '';
+    $('d-meta').textContent = when(current.created, true) + ' · ' + K.wordCount(current) + ' words' +
+      (current.flags && current.flags.length ? ' · ' + current.flags.length + ' flagged words to review in the panel' : '') +
+      (current.pushed ? ' · pushed ' + when(current.pushed) : '');
+    say('msg-d', '');
+    $('d-delete').textContent = 'Delete…';
+  }
+
+  function collectRec() {
+    if (!current) return null;
+    current.title = $('d-title').value.trim();
+    if ($('d-text').value !== $('d-text').dataset.orig) {
+      K.setEditedText(current, $('d-text').value);
+      $('d-text').dataset.orig = $('d-text').value;
+    }
+    current.summary = $('d-points').value.trim();
+    current.updated = Date.now();
+    return current;
+  }
+
+  async function saveRec(toPrep) {
+    const rec = collectRec();
+    if (!rec) return;
+    try {
+      await call('save', { id: rec.id, json: JSON.stringify(rec) });
+      let gid = $('d-group').value;
+      if (gid === '__new') {
+        const g = K.newGroup($('d-newgroup').value || 'Group ' + (data.groups.filter((x) => !x.eventId).length + 1));
+        data.groups.push(g);
+        gid = g.id;
+      }
+      if (gid) K.assignToGroup(data, gid, [rec.id]); else K.removeFromGroups(data, [rec.id]);
+      await saveGroups();
+      if (toPrep) {
+        st = JSON.parse((await call('state')).json || '{}');
+        if (st.liveId === rec.id) st.liveId = null;
+        st.prepId = rec.id;
+        await call('setState', { json: JSON.stringify(st) });
+      }
+      await loadData();
+      $('d-group').innerHTML = groupSelectHtml(gid || '');
+      $('d-newgroup').hidden = true;
+      say('msg-d', toPrep ? 'Saved and put in Prep. Open the floating panel to Push it.' : 'Saved.');
+    } catch (e) { say('msg-d', 'Save failed: ' + errText(e)); }
+  }
+
+  // ---------------------------------------------------------------- New symposium
 
   function resetSymp() {
     syImages = [];
@@ -398,7 +461,7 @@
   }
 
   async function readSymposium() {
-    if (!hasKey()) { say('msg-sy', 'Reading the programme needs a Claude API key (Settings tab).'); return; }
+    if (!hasKey()) { say('msg-sy', 'Reading the programme needs a Claude API key (Settings tab). Or tap Type it in myself.'); return; }
     const url = $('sy-url').value.trim();
     if (!syImages.length && !url) { say('msg-sy', 'Add a photo or screenshot, or paste the event page link.'); return; }
     $('sy-read').disabled = true;
@@ -446,171 +509,199 @@
 
   async function createSymposium() {
     collectSymp();
-    const list = syData.sessions.filter((x) => x.title || x.speakers.length);
-    if (!list.length) { say('msg-sy', 'Add at least one session.'); return; }
+    const list = syData.sessions.filter((x) => x.title || x.speakers.length || x.time);
     await loadData();
-    const made = K.makeSessionGroups(groups, { event: syData.event || 'Symposium', date: '', sessions: list });
+    let eventId;
+    if (list.length) {
+      const made = K.makeSessionGroups(data, { event: syData.event || 'Symposium', date: '', sessions: list });
+      eventId = made[0].eventId;
+    } else eventId = K.newEvent(data, syData.event || 'Symposium').id;
     try {
       await saveGroups();
-      say('msg-lib', made.length + ' sessions created for ' + (syData.event || 'Symposium') + '. Pick the session in the floating panel while you record.');
       resetSymp();
-      show('library');
-      renderLibrary();
+      stack.pop(); // leave New symposium; Back from the symposium goes to the Library
+      stack.push({ v: 'library', id: null });
+      show('event', eventId);
+      say('msg-e', 'Created. Pick a session in the floating panel while you record; its speakers become the chips.');
     } catch (e) { say('msg-sy', 'Could not save: ' + errText(e)); }
   }
 
-  // ---------------------------------------------------------------- recording view
+  // ---------------------------------------------------------------- setup + settings
 
-  async function openRec(id, from) {
-    try { current = await loadRec(id); } catch (e) { say('msg-lib', 'Could not open recording: ' + errText(e)); return; }
-    recFrom = from || 'library';
-    $('d-title').value = current.title || '';
-    $('d-title').placeholder = K.defaultTitle(current);
-    $('d-text').value = K.plain(current, opts());
-    $('d-text').dataset.orig = $('d-text').value;
-    $('d-points').value = current.summary || '';
-    const g = K.groupOf(groups, current.id);
-    $('d-group').innerHTML = groupOptions(g ? g.id : '');
-    $('d-newgroup').hidden = true;
-    $('d-newgroup').value = '';
-    $('d-meta').textContent = when(current.created, true) + ' · ' + K.wordCount(current) + ' words' +
-      (current.flags && current.flags.length ? ' · ' + current.flags.length + ' flagged words to review in the panel' : '') +
-      (current.pushed ? ' · pushed ' + when(current.pushed) : '');
-    say('msg-d', '');
-    $('d-delete').textContent = 'Delete…';
-    show('rec');
+  function mark(stepId, done, n) {
+    $(stepId).classList.toggle('done', !!done);
+    $(stepId).querySelector('.mark').textContent = done ? '✓' : n;
   }
 
-  function collectRec() {
-    if (!current) return null;
-    current.title = $('d-title').value.trim();
-    if ($('d-text').value !== $('d-text').dataset.orig) {
-      K.setEditedText(current, $('d-text').value);
-      $('d-text').dataset.orig = $('d-text').value;
+  function renderStatus(s) {
+    status = s;
+    mark('s-mic', s.mic, 1);
+    $('b-mic').textContent = s.mic ? 'Allowed' : 'Allow';
+    $('b-mic').disabled = !!s.mic;
+    mark('s-eng', s.recognizer, 2);
+    $('h-eng').textContent = s.recognizer
+      ? (s.onDevice ? 'Found, including on-device (works offline).' : 'Found (online; needs Wi-Fi or a hotspot).')
+      : 'None found. Install the Google app or “Speech Recognition & Synthesis from Google”.';
+    mark('s-ovl', s.overlay, 3);
+    $('b-ovl').textContent = s.overlay ? 'Allowed' : 'Allow';
+    $('b-ovl').disabled = !!s.overlay;
+    mark('s-acc', s.accessibility, 4);
+    mark('s-key', s.settings.hasKey, 5);
+    $('h-key').textContent = s.settings.hasKey ? 'Saved on this tablet. Paste a new one to replace it.' : 'Stored only on this tablet. From console.anthropic.com.';
+    $('b-bubble').textContent = s.bubble ? 'Hide floating button' : 'Show floating button';
+    $('b-bubble').classList.toggle('primary', !s.bubble);
+    if (!settingsLoaded) {
+      settingsLoaded = true;
+      const t = s.settings;
+      $('engine').value = t.engine || 'auto';
+      $('mute').checked = t.mute !== false;
+      $('cap').checked = t.cap !== false;
+      $('autoPeriod').checked = t.autoPeriod !== false;
+      $('lang').value = t.lang || '';
+      $('model').value = t.model || 'claude-sonnet-5-5';
+      $('context').value = t.context || '';
     }
-    current.summary = $('d-points').value.trim();
-    current.updated = Date.now();
-    return current;
   }
 
-  async function saveRec(toPrep) {
-    const rec = collectRec();
-    if (!rec) return;
+  async function refresh() {
+    try { renderStatus(await call('status')); } catch (e) { say('msg-set', 'Status failed: ' + errText(e)); }
+  }
+
+  async function saveSettings(extra) {
     try {
-      await call('save', { id: rec.id, json: JSON.stringify(rec) });
-      let gid = $('d-group').value;
-      if (gid === '__new') {
-        const g = K.newGroup($('d-newgroup').value || 'Group ' + (groups.groups.length + 1));
-        groups.groups.push(g);
-        gid = g.id;
-      }
-      if (gid) K.assignToGroup(groups, gid, [rec.id]); else K.removeFromGroups(groups, [rec.id]);
-      await saveGroups();
-      if (toPrep) {
-        st = JSON.parse((await call('state')).json || '{}');
-        if (st.liveId === rec.id) st.liveId = null;
-        st.prepId = rec.id;
-        await call('setState', { json: JSON.stringify(st) });
-      }
-      await loadData();
-      $('d-group').innerHTML = groupOptions(gid || '');
-      $('d-newgroup').hidden = true;
-      say('msg-d', toPrep ? 'Saved and put in Prep. Open the floating panel to Push it.' : 'Saved.');
-    } catch (e) { say('msg-d', 'Save failed: ' + errText(e)); }
+      renderStatus(await call('setSettings', Object.assign({
+        engine: $('engine').value, mute: $('mute').checked, cap: $('cap').checked, autoPeriod: $('autoPeriod').checked,
+        lang: $('lang').value.trim(), model: $('model').value, context: $('context').value,
+      }, extra || {})));
+      say('msg-set', 'Saved.');
+    } catch (e) { say('msg-set', 'Save failed: ' + errText(e)); }
   }
 
   // ---------------------------------------------------------------- wiring
 
   if (!native) { $('notnative').hidden = false; return; }
 
-  $('back').addEventListener('click', (e) => { e.preventDefault(); goBack(); });
-  TABS.forEach((t) => $('tab-' + t).addEventListener('click', () => { show(t); if (t === 'library') loadLibrary(); else refresh(); }));
+  $('back').addEventListener('click', (e) => { e.preventDefault(); back(); });
+  TABS.forEach((t) => $('tab-' + t).addEventListener('click', async () => {
+    stack.length = 0;
+    if (t === 'library') await loadData(); else refresh();
+    show(t);
+  }));
 
-  // New symposium
-  $('b-newsymp').onclick = () => { resetSymp(); show('symp'); };
-  $('sy-pick').addEventListener('change', async () => {
-    const files = Array.from($('sy-pick').files || []);
-    for (const f of files) { try { syImages.push(await shrinkImage(f)); } catch (e) { say('msg-sy', 'Could not read ' + f.name); } }
-    $('sy-pick').value = '';
-    $('sy-imgs').textContent = syImages.length ? syImages.length + (syImages.length === 1 ? ' image' : ' images') + ' added.' : 'No images yet.';
-  });
-  $('sy-reset').onclick = resetSymp;
-  $('sy-manual').onclick = () => {
-    // No Claude: start from one empty session and fill it in.
-    syData = { event: '', date: '', sessions: [{ time: '', title: '', speakers: [], room: '' }] };
-    renderSymp();
-    $('sy-review-h').textContent = 'Event and sessions';
-    $('sy-event').placeholder = 'Event name';
-    $('sy-event').focus();
+  // Library home
+  $('b-newsymp').onclick = () => { resetSymp(); go('symp'); };
+  $('b-newgroup').onclick = () => { $('ng-box').hidden = false; $('ng-name').value = ''; $('ng-name').focus(); };
+  $('ng-cancel').onclick = () => { $('ng-box').hidden = true; };
+  $('ng-ok').onclick = async () => {
+    const g = K.newGroup($('ng-name').value || 'Group ' + (data.groups.filter((x) => !x.eventId).length + 1));
+    data.groups.push(g);
+    await saveGroups();
+    $('ng-box').hidden = true;
+    go('group', g.id);
   };
-  $('sy-read').onclick = readSymposium;
-  $('sy-add').onclick = () => { collectSymp(); syData.sessions.push({ time: '', title: '', speakers: [], room: '' }); renderSymp(); };
-  $('sy-list').addEventListener('click', (e) => {
-    const b = e.target.closest('button[data-rm]');
-    if (!b) return;
-    collectSymp(); syData.sessions.splice(Number(b.dataset.rm), 1); renderSymp();
-  });
-  $('sy-create').onclick = createSymposium;
-
-  // Library
-  $('b-newgroup').onclick = () => openChooser(true);
-  $('b-select').onclick = () => setSelecting(true);
-  $('b-done').onclick = () => setSelecting(false);
-  $('b-addto').onclick = () => openChooser(false);
-  $('b-ungroup').onclick = async () => { K.removeFromGroups(groups, Array.from(picked)); await saveGroups(); setSelecting(false); say('msg-lib', 'Ungrouped.'); };
-  $('b-delsel').onclick = deleteSelected;
-  $('ch-group').onchange = () => { $('ch-name').hidden = $('ch-group').value !== '__new'; };
-  $('ch-cancel').onclick = () => { $('chooser').hidden = true; };
-  $('ch-ok').onclick = chooserOk;
-  $('lib').addEventListener('click', (e) => {
+  $('lib-home').addEventListener('click', (e) => {
     const b = e.target.closest('button');
     if (!b) return;
-    if (b.dataset.group) { openGroup(b.dataset.group); return; }
-    if (b.dataset.kp) { openGroup(b.dataset.kp, true); return; }
-    if (b.dataset.id) {
-      if (selecting) {
-        if (picked.has(b.dataset.id)) picked.delete(b.dataset.id); else picked.add(b.dataset.id);
-        renderLibrary();
-      } else openRec(b.dataset.id, 'library');
-    }
+    if (b.dataset.nav === 'unsorted') { uSelecting = false; uPicked.clear(); go('unsorted'); }
+    else if (b.dataset.event) go('event', b.dataset.event);
+    else if (b.dataset.group) go('group', b.dataset.group);
   });
 
-  // Group
-  $('g-name').addEventListener('change', async () => {
-    currentGroup.name = $('g-name').value.trim() || currentGroup.name;
-    $('g-name').value = currentGroup.name;
-    currentGroup.updated = Date.now();
-    await saveGroups();
-    say('msg-g', 'Renamed.');
+  // Unsorted
+  $('u-select').onclick = () => { uSelecting = true; uPicked.clear(); renderUnsorted(); };
+  $('u-done').onclick = () => { uSelecting = false; uPicked.clear(); renderUnsorted(); };
+  $('u-assign').onclick = () => { assignIds = Array.from(uPicked); go('assign'); };
+  let uDelArmed = 0;
+  $('u-delete').onclick = async () => {
+    if (Date.now() - uDelArmed > 4000) { uDelArmed = Date.now(); $('u-delete').textContent = 'Tap again to delete'; return; }
+    $('u-delete').textContent = 'Delete…';
+    const n = uPicked.size;
+    await removeRecordings(Array.from(uPicked));
+    uPicked.clear(); uSelecting = false;
+    await loadData();
+    renderUnsorted();
+    say('msg-u', plural(n, 'recording', 'recordings') + ' deleted.');
+  };
+  $('u-list').addEventListener('click', (e) => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    if (b.dataset.assign) { assignIds = [b.dataset.assign]; go('assign'); return; }
+    if (!b.dataset.id) return;
+    if (uSelecting) { if (uPicked.has(b.dataset.id)) uPicked.delete(b.dataset.id); else uPicked.add(b.dataset.id); renderUnsorted(); }
+    else openRec(b.dataset.id);
   });
-  $('g-points').addEventListener('change', async () => { currentGroup.summary = $('g-points').value.trim(); await saveGroups(); say('msg-g', 'Saved.'); });
+
+  // Symposium
+  $('e-name').addEventListener('change', async () => { K.renameEvent(data, viewId, $('e-name').value); await saveGroups(); say('msg-e', 'Renamed.'); });
+  $('e-add').onclick = async () => {
+    const g = K.addSession(data, viewId, {});
+    await saveGroups();
+    go('group', g.id);
+    $('g-title').focus();
+  };
+  $('e-list').addEventListener('click', (e) => { const b = e.target.closest('button[data-group]'); if (b) go('group', b.dataset.group); });
+  let eDelArmed = 0;
+  $('e-delete').onclick = async () => {
+    if (Date.now() - eDelArmed > 4000) { eDelArmed = Date.now(); $('e-delete').textContent = 'Tap again to delete the symposium'; return; }
+    K.deleteEvent(data, viewId);
+    await saveGroups();
+    await back();
+    say('msg-lib', 'Symposium deleted. Its recordings are in Unsorted.');
+  };
+
+  // Session / group
+  ['g-time', 'g-title', 'g-speakers', 'g-name'].forEach((id) => $(id).addEventListener('change', saveSessionFields));
+  $('g-points').addEventListener('change', async () => { const g = groupById(viewId); if (g) { g.summary = $('g-points').value.trim(); await saveGroups(); say('msg-g', 'Saved.'); } });
+  $('g-addrecs').onclick = () => { pPicked.clear(); go('pick', viewId); };
   $('g-gen').onclick = groupKeyPoints;
   $('g-pcopy').onclick = async () => {
-    if (!$('g-points').value.trim()) { say('msg-g', 'No key points yet.'); return; }
-    await call('copyText', { text: K.groupKeyPointsText({ name: currentGroup.name, summary: $('g-points').value }) });
+    const g = groupById(viewId);
+    if (!g || !$('g-points').value.trim()) { say('msg-g', 'No key points yet.'); return; }
+    await call('copyText', { text: K.groupKeyPointsText({ name: g.name, summary: $('g-points').value }) });
     say('msg-g', 'Key points copied.');
   };
   $('g-prep').onclick = groupToPrep;
-  $('g-copyall').onclick = async () => { await call('copyText', { text: await groupAllText() }); say('msg-g', 'Everything copied.'); };
-  $('g-share').onclick = async () => { call('shareText', { text: await groupAllText(), subject: currentGroup.name }).catch((e) => say('msg-g', errText(e))); };
+  $('g-copyall').onclick = async () => { const g = groupById(viewId); if (g) { await call('copyText', { text: await groupAllText(g) }); say('msg-g', 'Everything copied.'); } };
+  $('g-share').onclick = async () => { const g = groupById(viewId); if (g) call('shareText', { text: await groupAllText(g), subject: g.name }).catch((e) => say('msg-g', errText(e))); };
   let gDelArmed = 0;
   $('g-delete').onclick = async () => {
-    if (Date.now() - gDelArmed > 4000) { gDelArmed = Date.now(); $('g-delete').textContent = 'Tap again to delete group'; return; }
-    groups.groups = groups.groups.filter((g) => g !== currentGroup);
+    const g = groupById(viewId);
+    if (!g) return;
+    if (Date.now() - gDelArmed > 4000) { gDelArmed = Date.now(); $('g-delete').textContent = 'Tap again to delete'; return; }
+    K.deleteGroup(data, g.id);
     await saveGroups();
-    currentGroup = null;
-    show('library');
-    loadLibrary();
+    await back();
   };
   $('g-list').addEventListener('click', async (e) => {
     const b = e.target.closest('button');
     if (!b) return;
-    if (b.dataset.remove) {
-      K.removeFromGroups(groups, [b.dataset.remove]);
-      await saveGroups();
-      renderGroupList();
-    } else if (b.dataset.id) openRec(b.dataset.id, 'group');
+    if (b.dataset.remove) { K.removeFromGroups(data, [b.dataset.remove]); await saveGroups(); renderGroup(); say('msg-g', 'Moved to Unsorted.'); }
+    else if (b.dataset.id) openRec(b.dataset.id);
   });
+
+  // Assign / pick
+  $('a-list').addEventListener('click', (e) => { const b = e.target.closest('button[data-to]'); if (b) assignTo(b.dataset.to); });
+  $('a-new').onclick = async () => {
+    const g = K.newGroup($('a-newname').value || 'Group ' + (data.groups.filter((x) => !x.eventId).length + 1));
+    data.groups.push(g);
+    await saveGroups();
+    assignTo(g.id);
+  };
+  $('p-list').addEventListener('click', (e) => {
+    const b = e.target.closest('button[data-id]');
+    if (!b) return;
+    if (pPicked.has(b.dataset.id)) pPicked.delete(b.dataset.id); else pPicked.add(b.dataset.id);
+    renderPick();
+  });
+  $('p-cancel').onclick = () => back();
+  $('p-ok').onclick = async () => {
+    K.assignToGroup(data, viewId, Array.from(pPicked));
+    await saveGroups();
+    const n = pPicked.size;
+    pPicked.clear();
+    await back();
+    say('msg-g', plural(n, 'recording', 'recordings') + ' added.');
+  };
 
   // Recording
   $('d-group').onchange = () => { $('d-newgroup').hidden = $('d-group').value !== '__new'; if (!$('d-newgroup').hidden) $('d-newgroup').focus(); };
@@ -642,33 +733,49 @@
   };
   $('d-save').onclick = () => saveRec(false);
   $('d-prep').onclick = () => saveRec(true);
-  let delArmed = 0;
+  let dDelArmed = 0;
   $('d-delete').onclick = async () => {
-    if (Date.now() - delArmed > 4000) { delArmed = Date.now(); $('d-delete').textContent = 'Tap again to delete'; return; }
+    if (Date.now() - dDelArmed > 4000) { dDelArmed = Date.now(); $('d-delete').textContent = 'Tap again to delete'; return; }
     try {
-      st = JSON.parse((await call('state')).json || '{}');
-      if (st.liveId === current.id) st.liveId = null;
-      if (st.prepId === current.id) st.prepId = null;
-      await call('setState', { json: JSON.stringify(st) });
-      await call('remove', { id: current.id });
-      K.removeFromGroups(groups, [current.id]);
-      await saveGroups();
-      current = null;
-      await loadData();
-      if (recFrom === 'group' && currentGroup) openGroup(currentGroup.id); else { show('library'); renderLibrary(); }
+      await removeRecordings([current.id]);
+      await back();
     } catch (e) { say('msg-d', errText(e)); }
   };
+
+  // New symposium
+  $('sy-manual').onclick = () => {
+    syData = { event: '', date: '', sessions: [{ time: '', title: '', speakers: [], room: '' }] };
+    renderSymp();
+    $('sy-review-h').textContent = 'Event and sessions';
+    $('sy-event').placeholder = 'Event name';
+    $('sy-event').focus();
+  };
+  $('sy-pick').addEventListener('change', async () => {
+    const files = Array.from($('sy-pick').files || []);
+    for (const f of files) { try { syImages.push(await shrinkImage(f)); } catch (e) { say('msg-sy', 'Could not read ' + f.name); } }
+    $('sy-pick').value = '';
+    $('sy-imgs').textContent = syImages.length ? plural(syImages.length, 'image', 'images') + ' added.' : 'No images yet.';
+  });
+  $('sy-reset').onclick = resetSymp;
+  $('sy-read').onclick = readSymposium;
+  $('sy-add').onclick = () => { collectSymp(); syData.sessions.push({ time: '', title: '', speakers: [], room: '' }); renderSymp(); };
+  $('sy-list').addEventListener('click', (e) => {
+    const b = e.target.closest('button[data-rm]');
+    if (!b) return;
+    collectSymp(); syData.sessions.splice(Number(b.dataset.rm), 1); renderSymp();
+  });
+  $('sy-create').onclick = createSymposium;
 
   // Setup
   $('b-bubble').onclick = async () => {
     try {
       if (status && status.bubble) { await call('hideBubble'); setTimeout(refresh, 400); }
-      else render(await call('showBubble'));
+      else renderStatus(await call('showBubble'));
       say('msg-setup', '');
     } catch (e) { say('msg-setup', errText(e)); }
   };
   $('b-mic').onclick = async () => {
-    try { const s = await call('requestMic'); render(s); if (!s.mic) call('openAppSettings').catch(() => {}); } catch (e) { say('msg-setup', errText(e)); }
+    try { const s = await call('requestMic'); renderStatus(s); if (!s.mic) call('openAppSettings').catch(() => {}); } catch (e) { say('msg-setup', errText(e)); }
   };
   $('b-ovl').onclick = () => call('openOverlaySettings').catch((e) => say('msg-setup', errText(e)));
   $('b-acc').onclick = () => call('openAccessibilitySettings').catch((e) => say('msg-setup', errText(e)));
@@ -691,27 +798,22 @@
   $('b-raw-clear').onclick = async () => {
     if (Date.now() - rawArmed > 4000) { rawArmed = Date.now(); $('b-raw-clear').textContent = 'Tap again to clear'; return; }
     $('b-raw-clear').textContent = 'Clear…';
-    try { render(await call('clearTranscript')); say('msg-set', 'Backup cleared. Library recordings are untouched.'); } catch (e) { say('msg-set', errText(e)); }
+    try { renderStatus(await call('clearTranscript')); say('msg-set', 'Backup cleared. Library recordings are untouched.'); } catch (e) { say('msg-set', errText(e)); }
   };
 
-  Cap.addListener('App', 'resume', () => { refresh(); if (view === 'library') loadLibrary(); });
-  Cap.addListener('App', 'backButton', () => goBack());
+  Cap.addListener('App', 'resume', async () => { refresh(); await loadData(); render(); });
+  Cap.addListener('App', 'backButton', () => back());
 
-  async function route() {
+  async function start() {
     await refresh();
     await loadData();
     const h = location.hash;
-    let m;
-    if ((m = h.match(/^#rec=([a-z0-9]+)/))) { renderLibrary(); openRec(m[1], 'library'); return; }
-    if ((m = h.match(/^#group=([a-z0-9]+)/))) { renderLibrary(); openGroup(m[1]); return; }
+    const m = h.match(/^#rec=([a-z0-9]+)/);
+    if (m) { show('library'); openRec(m[1]); return; }
     const tab = h.replace('#', '');
     if (TABS.includes(tab)) show(tab);
     else show(status && status.mic && status.overlay && status.recognizer ? 'library' : 'setup');
-    renderLibrary();
   }
-  window.addEventListener('hashchange', () => {
-    const h = location.hash;
-    if (/^#(rec|group)=/.test(h) || TABS.includes(h.replace('#', ''))) route();
-  });
-  route();
+  window.addEventListener('hashchange', () => { if (/^#rec=/.test(location.hash) && view !== 'rec') start(); });
+  start();
 })();

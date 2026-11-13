@@ -104,6 +104,17 @@ ol li{margin:0 0 4px}
 .sess button{grid-column:1 / -1;min-height:40px}
 .event{margin:22px 0 8px;font-size:1.15rem;font-weight:600;border-bottom:3px solid var(--ink);padding-bottom:4px}
 
+/* Library home and lists */
+.lib.boxed{border:2px solid var(--ink)}
+.home-h{margin:22px 0 8px;font-size:.95rem;font-weight:600;letter-spacing:.06em;text-transform:uppercase}
+.chev{flex:none;font-size:1.4rem;font-weight:600;padding-left:8px}
+.inbox .rowbtn{min-height:72px}
+.inbox .t{font-size:1.1rem}
+.assign-ev{margin:16px 0 6px;font-weight:600;border-bottom:2px solid var(--ink);padding-bottom:3px}
+.dest{display:flex;flex-direction:column;gap:6px}
+.dest button{text-align:left;min-height:52px}
+.libbar .count{flex:2 1 auto;font-weight:600}
+
 /* Detail views */
 .field{display:block;margin:0 0 6px}
 #d-text{min-height:14em;font-size:.95rem}
@@ -129,31 +140,69 @@ ol li{margin:0 0 4px}
 
 <!-- ============================== Library ============================== -->
 <section id="v-library" role="tabpanel" aria-labelledby="tab-library">
-  <div class="libbar" id="libbar">
+  <div class="libbar">
     <button id="b-newsymp" class="primary">New symposium</button>
     <button id="b-newgroup">New group</button>
-    <button id="b-select">Select</button>
   </div>
-  <div class="libbar" id="selbar" hidden>
-    <span class="count" id="selcount">0 selected</span>
-    <button id="b-addto">Add to group</button>
-    <button id="b-ungroup">Ungroup</button>
-    <button id="b-delsel">Delete…</button>
-    <button id="b-done" class="primary">Done</button>
+  <div class="chooser" id="ng-box" hidden>
+    <label for="ng-name"><b>New group</b></label>
+    <input type="text" id="ng-name" placeholder="Group name">
+    <div class="r"><button id="ng-cancel">Cancel</button><button id="ng-ok" class="primary">Create</button></div>
   </div>
-  <div class="chooser" id="chooser" hidden>
-    <b id="ch-title">Add to group</b>
-    <div class="r">
-      <select id="ch-group" aria-label="Group"></select>
-      <input type="text" id="ch-name" placeholder="New group name" aria-label="New group name">
-    </div>
-    <div class="r">
-      <button id="ch-cancel">Cancel</button>
-      <button id="ch-ok" class="primary">Add</button>
-    </div>
-  </div>
-  <div id="lib"></div>
+  <div id="lib-home"></div>
   <p class="msg" id="msg-lib" role="status"></p>
+</section>
+
+<!-- ============================== Unsorted ============================== -->
+<section id="v-unsorted" hidden>
+  <div class="libbar" id="u-bar">
+    <span class="count" id="u-count"></span>
+    <button id="u-select">Select</button>
+  </div>
+  <div class="libbar" id="u-selbar" hidden>
+    <span class="count" id="u-selcount">0 selected</span>
+    <button id="u-assign" class="primary">Assign to…</button>
+    <button id="u-delete">Delete…</button>
+    <button id="u-done">Done</button>
+  </div>
+  <div id="u-list"></div>
+  <p class="msg" id="msg-u" role="status"></p>
+</section>
+
+<!-- ============================== Symposium ============================== -->
+<section id="v-event" hidden>
+  <div class="group">
+    <label for="e-name" class="field"><b>Symposium name</b></label>
+    <input type="text" id="e-name" style="width:100%">
+    <span class="hint" id="e-meta"></span>
+  </div>
+  <div class="group">
+    <h2>Sessions</h2>
+    <ul class="lib boxed" id="e-list"></ul>
+    <div class="btns"><button id="e-add" class="primary">+ Add session</button></div>
+  </div>
+  <div class="group">
+    <div class="btns"><button id="e-delete">Delete symposium…</button></div>
+    <span class="hint" style="margin-top:6px">Deleting keeps the recordings; they go back to Unsorted.</span>
+    <p class="msg" id="msg-e" role="status"></p>
+  </div>
+</section>
+
+<!-- ============================== Assign / pick ============================== -->
+<section id="v-assign" hidden>
+  <p class="hint" id="a-what" style="margin:14px 0 4px"></p>
+  <div id="a-list"></div>
+  <div class="chooser" style="margin-top:16px">
+    <label for="a-newname"><b>Or a new group</b></label>
+    <div class="r"><input type="text" id="a-newname" placeholder="Group name"><button id="a-new">Create &amp; assign</button></div>
+  </div>
+  <p class="msg" id="msg-a" role="status"></p>
+</section>
+
+<section id="v-pick" hidden>
+  <p class="hint" style="margin:14px 0 4px">Tap the recordings to add from Unsorted.</p>
+  <ul class="lib boxed" id="p-list"></ul>
+  <div class="btns"><button id="p-cancel">Cancel</button><button id="p-ok" class="primary">Add</button></div>
 </section>
 
 <!-- ============================== Setup ============================== -->
@@ -292,32 +341,43 @@ ol li{margin:0 0 4px}
   </div>
 </section>
 
-<!-- ============================== Group ============================== -->
+<!-- ============================== Session / group ============================== -->
 <section id="v-group" hidden>
-  <div class="group">
+  <div class="group" id="g-session-fields">
+    <span class="hint" id="g-event"></span>
+    <div class="sess" style="margin-top:6px">
+      <input type="text" id="g-time" aria-label="Time" placeholder="Time">
+      <input type="text" id="g-title" aria-label="Title" placeholder="Title">
+      <input class="who" type="text" id="g-speakers" aria-label="Speakers" placeholder="Speakers, separated by commas">
+    </div>
+    <span class="hint" style="margin-top:4px">The speakers become the chips in the floating panel when you pick this session.</span>
+  </div>
+  <div class="group" id="g-group-fields">
     <label for="g-name" class="field"><b>Group name</b></label>
-    <input type="text" id="g-name">
-    <span class="hint" id="g-meta"></span>
+    <input type="text" id="g-name" style="width:100%">
   </div>
   <div class="group">
-    <label for="g-points" class="field"><b>Key points for the whole group</b></label>
+    <h2>Recordings <span class="hint" style="display:inline" id="g-meta"></span></h2>
+    <ul class="lib boxed" id="g-list"></ul>
+    <div class="btns"><button id="g-addrecs" class="primary">+ Add recordings</button></div>
+  </div>
+  <div class="group">
+    <label for="g-points" class="field"><b>Key points</b></label>
     <textarea id="g-points" placeholder="None yet."></textarea>
     <div class="btns">
-      <button id="g-gen" class="primary">Generate key points</button>
+      <button id="g-gen">Generate key points</button>
       <button id="g-pcopy">Copy</button>
       <button id="g-prep">Put in Prep</button>
     </div>
-    <p class="msg" id="msg-g" role="status"></p>
   </div>
   <div class="group">
-    <h2>Recordings</h2>
-    <ul class="lib" id="g-list" style="border:2px solid #000"></ul>
     <div class="btns">
       <button id="g-copyall">Copy everything</button>
       <button id="g-share">Share</button>
-      <button id="g-delete">Delete group…</button>
+      <button id="g-delete">Delete…</button>
     </div>
-    <span class="hint" style="margin-top:6px">Deleting a group keeps its recordings.</span>
+    <span class="hint" style="margin-top:6px">Deleting keeps the recordings; they go back to Unsorted.</span>
+    <p class="msg" id="msg-g" role="status"></p>
   </div>
 </section>
 

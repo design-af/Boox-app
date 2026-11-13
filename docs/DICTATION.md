@@ -77,3 +77,14 @@ Flow: **Live → Prep → Push**, every recording kept in a **Library**.
   (`makeSessionGroups`). The Library shows each event as a heading with its sessions in order.
   Panel Live has a "Session" picker (state `sessionId`); Prep ▸ files the segment into that
   session's group (panel bridge `groups` / `saveGroups`).
+- Builds 31–33:
+  - A picked session's speakers name the Live chips (A = first listed; bracketed firms dropped);
+    named speakers are labelled from the first sentence. Chips stay in letter order and scroll.
+  - Prep clears after a successful Push (Undo restores; the recording stays in the Library).
+  - Library rebuilt as drill-down screens: home (Unsorted, Symposiums, Groups) → Unsorted
+    (Assign per recording or Select → Assign to… / Delete) → Symposium (rename, sessions, + Add
+    session, delete → recordings to Unsorted) → Session/Group (time/title/speakers or name,
+    + Add recordings from Unsorted, Remove, key points, copy/share, delete). groups.json now
+    also keeps `events` (`ensureEvents`, `renameEvent`, `addSession`, `updateSession`,
+    `deleteGroup`, `deleteEvent`, `unsortedIds`). Recording page's group picker is grouped by
+    symposium.
