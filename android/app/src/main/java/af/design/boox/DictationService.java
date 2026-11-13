@@ -7,6 +7,9 @@ import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.Service;
+import android.content.BroadcastReceiver;
+import android.content.IntentFilter;
+import android.os.PowerManager;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
@@ -107,6 +110,22 @@ public class DictationService extends Service {
     private int quickErrors;
     private final ArrayList<Integer> muted = new ArrayList<>();
     private final Runnable listenRunnable = this::listen;
+    // Restarting the engine always goes through this one runnable, so restarts never pile up.
+    private final Runnable restartRunnable = () -> { if (running) { createRecognizer(); listen(); } };
+    private long lastEngineEvent;     // last sign of life from the speech engine
+    private PowerManager.WakeLock wakeLock;
+    private BroadcastReceiver screenReceiver;
+    /** Every 5 s while recording: a speech engine that has gone silent (e.g. after the tablet slept) is restarted. */
+    private final Runnable watchdog = new Runnable() {
+        @Override public void run() {
+            if (!running) return;
+            if (SystemClock.elapsedRealtime() - lastEngineEvent > 20000) {
+                state("Speech engine went quiet \u2014 restarting");
+                kick();
+            }
+            main.postDelayed(this, 5000);
+        }
+    };
 
     static boolean isRunning() { return instance != null; }
 
@@ -130,6 +149,16 @@ public class DictationService extends Service {
         instance = this;
         wm = (WindowManager) getSystemService(Context.WINDOW_SERVICE);
         createChannel();
+        // When the tablet wakes up, restart the engine straight away (it often dies during sleep).
+        screenReceiver = new BroadcastReceiver() {
+            @Override public void onReceive(Context c, Intent i) {
+                if (!running) return;
+                main.postDelayed(() -> { if (running) { state("Resumed after sleep"); kick(); } }, 800);
+            }
+        };
+        IntentFilter f = new IntentFilter(Intent.ACTION_SCREEN_ON);
+        f.addAction(Intent.ACTION_USER_PRESENT);
+        try { ContextCompat.registerReceiver(this, screenReceiver, f, ContextCompat.RECEIVER_NOT_EXPORTED); } catch (Exception ignored) { }
     }
 
     @Override
@@ -155,6 +184,8 @@ public class DictationService extends Service {
         main.removeCallbacksAndMessages(null);
         destroyRecognizer();
         unmuteBeeps();
+        releaseWake();
+        try { if (screenReceiver != null) unregisterReceiver(screenReceiver); } catch (Exception ignored) { }
         try { if (bubble != null) wm.removeView(bubble); } catch (Exception ignored) { }
         try { if (panel != null) wm.removeView(panel); } catch (Exception ignored) { }
         if (web != null) { try { web.destroy(); } catch (Exception ignored) { } }
@@ -384,6 +415,7 @@ public class DictationService extends Service {
 
     private void setPanelOpen(boolean open) {
         panelOpen = open;
+        if (!open) setPanelFocusable(false);
         layoutPanel();
         styleBubble();
     }
@@ -439,7 +471,16 @@ public class DictationService extends Service {
                         if (dragging) {
                             prefs().edit().putInt("bubbleX", bubbleLp.x).putInt("bubbleY", bubbleLp.y).apply();
                         } else if (!longFired) {
-                            setPanelOpen(!panelOpen);
+                            // Double-tap = a new speaker started (speaker unknown); single tap = panel.
+                            long now = SystemClock.uptimeMillis();
+                            if (now - lastTapAt < 320) {
+                                lastTapAt = 0;
+                                main.removeCallbacks(singleTap);
+                                onBubbleDoubleTap();
+                            } else {
+                                lastTapAt = now;
+                                main.postDelayed(singleTap, 320);
+                            }
                         }
                         return true;
                     case MotionEvent.ACTION_CANCEL:
@@ -466,6 +507,29 @@ public class DictationService extends Service {
         if (bubble == null) return;
         avoidIme();
         try { if (bubble.isAttachedToWindow()) wm.updateViewLayout(bubble, bubbleLp); } catch (Exception ignored) { }
+    }
+
+    private long lastTapAt;
+    private final Runnable singleTap = () -> setPanelOpen(!panelOpen);
+
+    private void onBubbleDoubleTap() {
+        if (!running) {
+            android.widget.Toast.makeText(this, "Not recording", android.widget.Toast.LENGTH_SHORT).show();
+            return;
+        }
+        js("KB.onSpeakerMark()");
+        if (bubble != null) bubble.setBadge("?");
+        android.widget.Toast.makeText(this, "New speaker marked", android.widget.Toast.LENGTH_SHORT).show();
+    }
+
+    /** While a rename field is open the panel takes typing focus; otherwise the app below keeps it. */
+    private void setPanelFocusable(boolean on) {
+        if (panelLp == null || panel == null) return;
+        boolean was = (panelLp.flags & WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE) == 0;
+        if (was == on) return;
+        if (on) panelLp.flags &= ~WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE;
+        else panelLp.flags |= WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE;
+        try { wm.updateViewLayout(panel, panelLp); } catch (Exception ignored) { }
     }
 
     private void styleBubble() {
@@ -528,11 +592,14 @@ public class DictationService extends Service {
                     main.postDelayed(cutFallback, 18000);
                 } else {
                     js("KB.onCut()");
+                    if (running && SystemClock.elapsedRealtime() - lastEngineEvent > 8000) kick();
                 }
             });
         }
         @JavascriptInterface public void remove(String id) { DictationStore.delete(DictationService.this, id); }
         @JavascriptInterface public void collapse() { main.post(() -> setPanelOpen(false)); }
+        @JavascriptInterface public void setBadge(String b) { main.post(() -> { if (bubble != null) bubble.setBadge(b); }); }
+        @JavascriptInterface public void setFocusable(boolean on) { main.post(() -> setPanelFocusable(on)); }
         @JavascriptInterface public void quit() { main.post(DictationService.this::stopSelf); }
         @JavascriptInterface public void openApp(String page) { main.post(() -> { setPanelOpen(false); DictationService.this.openApp(page); }); }
 
@@ -610,11 +677,42 @@ public class DictationService extends Service {
         deviceFailed = false;
         if (prefs().getBoolean("mute", true)) muteBeeps();
         DictationStore.appendTranscript(this, "\n\n— " + new SimpleDateFormat("EEE d MMM yyyy, h:mm a", Locale.getDefault()).format(new Date()) + " —\n");
+        acquireWake();
         createRecognizer();
         styleBubble();
         updateNote();
         state("Starting…");
         listen();
+        main.removeCallbacks(watchdog);
+        main.postDelayed(watchdog, 5000);
+    }
+
+    /** Throw the engine away and start listening again now. */
+    private void kick() {
+        if (!running) return;
+        main.removeCallbacks(listenRunnable);
+        main.removeCallbacks(restartRunnable);
+        quickErrors = 0;
+        speechActive = false;
+        lastEngineEvent = SystemClock.elapsedRealtime();
+        createRecognizer();
+        listen();
+    }
+
+    /** Keeps the processor running while recording, so transcription can carry on with the screen off. */
+    private void acquireWake() {
+        try {
+            if (wakeLock == null) {
+                PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
+                wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "AsideTranscribe:recording");
+                wakeLock.setReferenceCounted(false);
+            }
+            wakeLock.acquire(4L * 60 * 60 * 1000);
+        } catch (Exception ignored) { }
+    }
+
+    private void releaseWake() {
+        try { if (wakeLock != null && wakeLock.isHeld()) wakeLock.release(); } catch (Exception ignored) { }
     }
 
     private void stopRec(String why) {
@@ -628,11 +726,14 @@ public class DictationService extends Service {
             js("KB.onCut()");
         }
         main.removeCallbacks(listenRunnable);
+        main.removeCallbacks(restartRunnable);
+        main.removeCallbacks(watchdog);
         if (recognizer != null) {
             try { recognizer.cancel(); } catch (Exception ignored) { }
         }
         destroyRecognizer();
         unmuteBeeps();
+        releaseWake();
         styleBubble();
         if (was) updateNote();
         state(why);
@@ -684,6 +785,7 @@ public class DictationService extends Service {
         i.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 15000L);
         if (Build.VERSION.SDK_INT >= 33) i.putExtra("android.speech.extra.ENABLE_FORMATTING", "quality");
         listenStartedAt = SystemClock.elapsedRealtime();
+        lastEngineEvent = listenStartedAt;
         speechActive = false;
         try {
             recognizer.startListening(i);
@@ -698,7 +800,8 @@ public class DictationService extends Service {
         if (sinceStart < 1500) quickErrors = Math.min(quickErrors + 1, 6); else quickErrors = 0;
         long delay = baseDelay + quickErrors * 600L;
         main.removeCallbacks(listenRunnable);
-        if (recreate) main.postDelayed(() -> { if (running) { createRecognizer(); listen(); } }, delay);
+        main.removeCallbacks(restartRunnable);
+        if (recreate) main.postDelayed(restartRunnable, delay);
         else main.postDelayed(listenRunnable, delay);
     }
 
@@ -723,10 +826,11 @@ public class DictationService extends Service {
 
     private final RecognitionListener listener = new RecognitionListener() {
         @Override public void onReadyForSpeech(Bundle params) {
+            lastEngineEvent = SystemClock.elapsedRealtime();
             if (running) state("Listening" + (usingDevice ? " (on-device)" : ""));
         }
-        @Override public void onBeginningOfSpeech() { speechActive = true; }
-        @Override public void onRmsChanged(float rmsdB) { }
+        @Override public void onBeginningOfSpeech() { speechActive = true; lastEngineEvent = SystemClock.elapsedRealtime(); }
+        @Override public void onRmsChanged(float rmsdB) { lastEngineEvent = SystemClock.elapsedRealtime(); }
         @Override public void onBufferReceived(byte[] buffer) { }
         @Override public void onEndOfSpeech() { }
         @Override public void onEvent(int eventType, Bundle params) { }
@@ -734,6 +838,7 @@ public class DictationService extends Service {
         @Override public void onPartialResults(Bundle b) {
             if (!running || b == null) return;
             speechActive = true;
+            lastEngineEvent = SystemClock.elapsedRealtime();
             if (!panelOpen) return;
             long now = SystemClock.elapsedRealtime();
             if (now - lastPartialAt < 700) return;
@@ -743,6 +848,7 @@ public class DictationService extends Service {
         }
 
         @Override public void onResults(Bundle b) {
+            lastEngineEvent = SystemClock.elapsedRealtime();
             deliverPhrase(b);
             speechActive = false;
             if (cutPending) {
@@ -760,6 +866,7 @@ public class DictationService extends Service {
         }
 
         @Override public void onError(int error) {
+            lastEngineEvent = SystemClock.elapsedRealtime();
             speechActive = false;
             if (cutPending) {
                 cutPending = false;

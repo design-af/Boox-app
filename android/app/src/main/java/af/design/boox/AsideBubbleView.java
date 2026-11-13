@@ -23,11 +23,16 @@ public class AsideBubbleView extends View {
     private final Path glyph = new Path();
     private final Path scaled = new Path();
     private final Matrix m = new Matrix();
+    private final Paint badgeText = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private String badge = "";
 
     public AsideBubbleView(Context c) {
         super(c);
         ring.setStyle(Paint.Style.STROKE);
         buildGlyph(glyph);
+        badgeText.setColor(Color.BLACK);
+        badgeText.setTextAlign(Paint.Align.CENTER);
+        badgeText.setFakeBoldText(true);
         setContentDescription("Aside Transcribe");
     }
 
@@ -45,6 +50,14 @@ public class AsideBubbleView extends View {
         this.recording = recording;
         this.panelOpen = panelOpen;
         setContentDescription("Aside Transcribe" + (recording ? ", recording" : "") + (panelOpen ? ", panel open" : ""));
+        invalidate();
+    }
+
+    /** Current speaker letter in a small badge ("" hides it, "?" = unknown speaker). */
+    void setBadge(String b) {
+        b = b == null ? "" : b;
+        if (b.equals(badge)) return;
+        badge = b;
         invalidate();
     }
 
@@ -80,5 +93,18 @@ public class AsideBubbleView extends View {
         glyph.transform(m, scaled);
         fill.setColor(recording ? Color.WHITE : Color.BLACK);
         canvas.drawPath(scaled, fill);
+
+        if (!badge.isEmpty()) {
+            float br = size * 0.2f;
+            float bx = w - br - dp(1), by = br + dp(1);
+            fill.setColor(Color.WHITE);
+            canvas.drawCircle(bx, by, br, fill);
+            ring.setColor(Color.BLACK);
+            ring.setStrokeWidth(dp(2.5f));
+            canvas.drawCircle(bx, by, br - dp(1.25f), ring);
+            badgeText.setTextSize(br * 1.2f);
+            String t = badge.length() > 2 ? badge.substring(0, 2) : badge;
+            canvas.drawText(t, bx, by - (badgeText.descent() + badgeText.ascent()) / 2f, badgeText);
+        }
     }
 }

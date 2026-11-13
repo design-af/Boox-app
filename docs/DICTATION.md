@@ -55,3 +55,17 @@ Flow: **Live → Prep → Push**, every recording kept in a **Library**.
   `saveGroups`); a recording is in at most one group. The panel no longer has a Library tab.
   Live's Clear asks "Clear everything in Live?" first. Prep ▸ now waits for the speaker's own pause
   to end the sentence (forced after 12 s, gives up after 18 s) instead of cutting at the tap.
+- Build 27:
+  - Claude never runs on its own: Prep ▸ only does on-tablet checks (engine alternatives,
+    unknown speaker turns). Check, Speakers and Summary call Claude when tapped.
+  - Speaker marking: phrase `spk` starts a turn ("A", "B", … or "?"), names in `rec.speakers`.
+    Live has a Speaking row (chips + "+ New"); a chip tapped mid-sentence marks the sentence being
+    heard (pending.spk). Tap any word in Live (or "New speaker here" in Prep) to start a speaker
+    there (`splitTurn`). Bubble double-tap = unknown turn "?" (badge on the bubble shows the
+    current speaker once there is more than one). Prep: "?" turns and Claude's suggestions are
+    `kind:"spk"` flags (pick a speaker, + New, Not a change); tap a label to rename (panel takes
+    typing focus only while the field is open). Labels only appear once there is a second speaker;
+    Push writes "Name: " at each turn. Speakers button = `speakerRequest` / `applySpeakers`.
+  - Sleep: a watchdog restarts the speech engine if it goes quiet for 20 s; it also restarts on
+    screen-on/unlock; a partial wake lock is held while recording; restarts go through one
+    runnable (no duplicate restart chains); Prep ▸ on a stalled engine restarts it.

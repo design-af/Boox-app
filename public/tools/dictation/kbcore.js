@@ -9,6 +9,11 @@
 //   end   = punctuation chosen by the user for the end of the phrase (null = automatic).
 //   br    = phrase starts a new paragraph.
 //   fixed = text edited by hand; shown exactly as written.
+//   spk   = a speaker turn starts at this phrase: "A", "B", … or "?" (unknown, from the bubble).
+//           The speaker carries on until the next phrase with spk. Names live in rec.speakers
+//           ({ A: "Moderator" }); the first turn is speaker A unless a phrase says otherwise.
+//   flags with kind "spk" are speaker questions: an unknown turn (unknown: true) or a place
+//           where Claude thinks a new person starts talking (ws = first word of the new turn).
 //   flags point at words ws..we-1 of phrase p.
 (function (root) {
   'use strict';
@@ -46,18 +51,23 @@
     const autoPeriod = opts.autoPeriod !== false;
     const out = [];
     let prevSent = true;
+    let cur = null;
     for (const p of (rec && rec.phrases) || []) {
       const ws = words(p.raw);
       if (!ws.length) continue;
+      // A turn starts at the first phrase, and wherever a phrase names a different speaker.
+      let spk = null;
+      if (cur === null) { cur = p.spk || 'A'; spk = cur; }
+      else if (p.spk && (p.spk !== cur || p.spk === '?')) { cur = p.spk; spk = cur; }
       if (!p.fixed) {
-        if (cap && (prevSent || p.br)) ws[0] = capFirst(ws[0]);
+        if (cap && (prevSent || p.br || (spk && out.length))) ws[0] = capFirst(ws[0]);
         let last = ws[ws.length - 1];
         if (p.end != null) last = last.replace(/[.?!,;:…]+$/, '') + p.end;
         else if (autoPeriod && !END_PUNCT.test(last)) last += '.';
         ws[ws.length - 1] = last;
       }
       const text = ws.join(' ');
-      out.push({ p, words: ws, sep: out.length === 0 ? '' : (p.br ? '\n' : ' '), text });
+      out.push({ p, words: ws, sep: out.length === 0 ? '' : (p.br || spk ? '\n' : ' '), text, spk });
       prevSent = SENT_END.test(text);
     }
     return out;
@@ -78,6 +88,7 @@
       end: pending && pending.end != null ? pending.end : null,
       br: !!(pending && pending.br && rec.phrases.length),
     };
+    if (pending && pending.spk) p.spk = pending.spk;
     rec.phrases.push(p);
     rec.updated = Date.now();
     return p;
@@ -93,7 +104,7 @@
     const key = words(p.raw).slice(f.ws, f.we).map(norm).join(' ');
     if ((p.kept || []).includes(key)) return false;
     const sugg = (f.sugg || []).map((s) => String(s).trim()).filter((s) => s && norm(s) !== key.replace(/ /g, '') && s.toLowerCase() !== key);
-    const existing = rec.flags.find((g) => overlaps(g, f));
+    const existing = rec.flags.find((g) => g.kind !== 'spk' && overlaps(g, f));
     if (existing) {
       for (const s of sugg) if (!existing.sugg.some((t) => t.toLowerCase() === s.toLowerCase())) {
         if (f.src === 'ai') existing.sugg.unshift(s); else existing.sugg.push(s);
@@ -152,9 +163,10 @@
   }
 
   function localCheck(rec) {
-    rec.flags = rec.flags.filter((f) => f.src === 'ai');
+    rec.flags = rec.flags.filter((f) => f.src === 'ai' || f.src === 'spk-ai' || (f.src === 'unk' && f.sugg && f.sugg.length));
     let n = 0;
     for (const p of rec.phrases) for (const f of altFlags(p)) if (addFlag(rec, f)) n++;
+    unknownTurnFlags(rec);
     sortFlags(rec);
     return n;
   }
@@ -221,7 +233,180 @@
 
   // fixed phrases keep their own line breaks; words() would collapse them.
   function renderFixedAware(rec, opts) {
-    return render(rec, opts).map((r) => r.sep + (r.p.fixed ? String(r.p.raw).trim() : r.text)).join('');
+    const labels = usesLabels(rec);
+    return render(rec, opts).map((r) => r.sep + (labels && r.spk ? speakerName(rec, r.spk) + ': ' : '') +
+      (r.p.fixed ? String(r.p.raw).trim() : r.text)).join('');
+  }
+
+  // ---------------------------------------------------------------- speakers
+
+  const LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+
+  /** Speaker ids in order of appearance (A first), including declared ones not yet used. */
+  function speakerIds(rec) {
+    const seen = [];
+    const add = (x) => { if (x && x !== '?' && !seen.includes(x)) seen.push(x); };
+    const first = rec.phrases.find((p) => words(p.raw).length);
+    add((first && first.spk && first.spk !== '?') ? first.spk : 'A');
+    rec.phrases.forEach((p) => add(p.spk));
+    Object.keys(rec.speakers || {}).forEach(add);
+    return seen;
+  }
+
+  /** Labels appear once a second speaker (or an unknown turn) is in the text. */
+  function usesLabels(rec) {
+    const turns = new Set(render(rec, { autoPeriod: false, cap: false }).filter((r) => r.spk).map((r) => r.spk));
+    return turns.size > 1 || turns.has('?');
+  }
+
+  const speakerName = (rec, id) => id === '?' ? 'Unknown speaker' : ((rec.speakers && rec.speakers[id]) || 'Speaker ' + id);
+  const speakerTag = (rec, id) => id === '?' ? '?' : ((rec.speakers && rec.speakers[id]) || id);
+
+  function newSpeakerId(rec) {
+    const used = speakerIds(rec);
+    return LETTERS.split('').find((l) => !used.includes(l)) || ('S' + (used.length + 1));
+  }
+
+  function declareSpeaker(rec, id) {
+    rec.speakers = rec.speakers || {};
+    if (id && id !== '?' && !(id in rec.speakers)) rec.speakers[id] = '';
+    return id;
+  }
+
+  function renameSpeaker(rec, id, name) {
+    declareSpeaker(rec, id);
+    rec.speakers[id] = String(name || '').trim();
+    rec.updated = Date.now();
+  }
+
+  /** The speaker talking at the end of the text. */
+  function currentSpeaker(rec) {
+    const rows = render(rec, { autoPeriod: false, cap: false });
+    let cur = 'A';
+    rows.forEach((r) => { if (r.spk) cur = r.spk; });
+    return cur;
+  }
+
+  /** A new speaker starts at word i of phrase pid (splitting the phrase when i > 0). */
+  function splitTurn(rec, pid, i, spk) {
+    const idx = rec.phrases.findIndex((p) => p.id === pid);
+    if (idx < 0) return null;
+    declareSpeaker(rec, spk);
+    const p = rec.phrases[idx];
+    const W = words(p.raw);
+    if (i <= 0 || i >= W.length) { p.spk = spk; p.br = false; rec.updated = Date.now(); return p; }
+    const tail = { id: rec.nextPid++, raw: W.slice(i).join(' '), alts: [], conf: -1, end: p.end, br: false, spk };
+    p.raw = W.slice(0, i).join(' ');
+    p.end = null;
+    p.alts = [];
+    rec.flags = rec.flags.filter((f) => {
+      if (f.p !== pid) return true;
+      if (f.we <= i && !(f.kind === 'spk' && f.ws === i)) return true;
+      if (f.ws >= i) { f.p = tail.id; f.ws -= i; f.we -= i; return !(f.kind === 'spk' && f.ws === 0); }
+      return false;
+    });
+    rec.phrases.splice(idx + 1, 0, tail);
+    rec.updated = Date.now();
+    return tail;
+  }
+
+  /** "Not a change": the turn joins the previous speaker. */
+  function clearTurn(rec, pid) {
+    const p = phraseById(rec, pid);
+    if (p) { delete p.spk; rec.updated = Date.now(); }
+  }
+
+  function unknownTurnFlags(rec) {
+    for (const p of rec.phrases) {
+      if (p.spk !== '?' || !words(p.raw).length) continue;
+      if (rec.flags.some((f) => f.kind === 'spk' && f.p === p.id && f.ws === 0)) continue;
+      rec.flags.push({ id: 'f' + Math.random().toString(36).slice(2, 8), kind: 'spk', unknown: true, p: p.id, ws: 0, we: 1, sugg: [], reason: 'Marked from the bubble', src: 'unk' });
+    }
+  }
+
+  /** Answer a speaker question: who starts talking here (an id, or "new"). */
+  function resolveSpeakerFlag(rec, flag, id) {
+    if (id === 'new') id = newSpeakerId(rec);
+    declareSpeaker(rec, id);
+    if (flag.unknown) { const p = phraseById(rec, flag.p); if (p) p.spk = id; }
+    else splitTurn(rec, flag.p, flag.ws, id);
+    rec.flags = rec.flags.filter((f) => f.id !== flag.id);
+    rec.updated = Date.now();
+    return id;
+  }
+
+  function dismissSpeakerFlag(rec, flag) {
+    if (flag.unknown) clearTurn(rec, flag.p);
+    rec.flags = rec.flags.filter((f) => f.id !== flag.id);
+    rec.updated = Date.now();
+  }
+
+  function speakerRequest(rec, opts, ctx) {
+    const ids = speakerIds(rec);
+    const lines = render(rec, opts).map((r) => '[' + r.p.id + '] ' + (r.spk ? '(' + (r.spk === '?' ? 'unknown' : r.spk) + ') ' : '') + r.text).join('\n');
+    return {
+      max_tokens: 3000,
+      system: 'You review live transcripts of talks for speaker changes. Turns already marked show the speaker in brackets, like (A) or (B), at the start of a line; the speaker carries on until the next marked turn. (unknown) marks a turn where the listener knew the voice changed but not who it was.',
+      messages: [{ role: 'user', content: contextBlock(ctx) + 'Known speakers: ' + ids.join(', ') + (Object.keys(rec.speakers || {}).filter((k) => rec.speakers[k]).length ? ' (' + ids.map((k) => k + (rec.speakers && rec.speakers[k] ? ' = ' + rec.speakers[k] : '')).join(', ') + ')' : '') +
+        '.\n\nTranscript, one numbered line per phrase:\n' + lines +
+        '\n\n1. For every (unknown) turn, say which known speaker it most likely is, or "new" for someone else.\n2. Find places where a different person clearly starts talking that are NOT marked, such as an audience question, a moderator handing over, or a reply. Give the first few words of the new turn exactly as written, and who it is (a known letter or "new"). Only report changes you are fairly sure of.' }],
+      tools: [{
+        name: 'report_speakers',
+        description: 'Report who the unknown turns are and where unmarked speaker changes happen.',
+        input_schema: {
+          type: 'object',
+          properties: {
+            changes: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  line: { type: 'integer', description: 'the [number] of the line' },
+                  quote: { type: 'string', description: 'first words of the new turn, exactly as written; empty for an (unknown) turn' },
+                  speaker: { type: 'string', description: 'a known speaker letter, or "new"' },
+                  reason: { type: 'string', description: 'a few words of why' },
+                },
+                required: ['line', 'speaker'],
+              },
+            },
+          },
+          required: ['changes'],
+        },
+      }],
+      tool_choice: { type: 'tool', name: 'report_speakers' },
+    };
+  }
+
+  /** Adds Claude's speaker suggestions as speaker questions; returns how many. */
+  function applySpeakers(rec, response) {
+    const res = typeof response === 'string' ? JSON.parse(response) : response;
+    const block = (res.content || []).find((c) => c.type === 'tool_use');
+    const changes = (block && block.input && block.input.changes) || [];
+    unknownTurnFlags(rec);
+    let n = 0;
+    for (const c of changes) {
+      const sp = String(c.speaker || '').trim();
+      const who = sp.toLowerCase() === 'new' ? 'new' : sp.toUpperCase();
+      const p = phraseById(rec, c.line);
+      if (!p || !who) continue;
+      let ws = 0;
+      if (c.quote && String(c.quote).trim()) {
+        const r = findRange(p, c.quote);
+        if (!r) continue;
+        ws = r[0];
+      }
+      if (ws === 0 && p.spk === '?') {
+        const f = rec.flags.find((x) => x.kind === 'spk' && x.unknown && x.p === p.id);
+        if (f) { f.sugg = [who]; f.reason = c.reason || 'Claude\u2019s guess'; f.src = 'unk'; n++; }
+        continue;
+      }
+      if (ws === 0 && p.spk) continue; // already marked
+      if (rec.flags.some((x) => x.kind === 'spk' && x.p === p.id && x.ws === ws)) continue;
+      rec.flags.push({ id: 'f' + Math.random().toString(36).slice(2, 8), kind: 'spk', unknown: false, p: p.id, ws, we: ws + 1, sugg: [who], reason: c.reason || '', src: 'spk-ai' });
+      n++;
+    }
+    sortFlags(rec);
+    return n;
   }
 
   // ---------------------------------------------------------------- Claude
@@ -365,7 +550,9 @@
     words, norm, newRecording, defaultTitle, titleOf, render, plain: renderFixedAware, wordCount,
     phraseById, addPhrase, altFlags, findRange, localCheck, addFlag, sortFlags, replaceWords, applyFlag,
     keepFlag, deletePhrase, deleteLastWord, setEditedText, auditRequest, applyAudit, summaryRequest,
-    applySummary, keyPointsText, newGroup, assignToGroup, removeFromGroups, groupOf, groupSummaryRequest,
+    applySummary, keyPointsText, speakerIds, usesLabels, speakerName, speakerTag, newSpeakerId, declareSpeaker,
+    renameSpeaker, currentSpeaker, splitTurn, clearTurn, unknownTurnFlags, resolveSpeakerFlag, dismissSpeakerFlag,
+    speakerRequest, applySpeakers, newGroup, assignToGroup, removeFromGroups, groupOf, groupSummaryRequest,
     groupKeyPointsText,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

@@ -74,4 +74,45 @@ K.applySummary(g, { content: [{ type: 'text', text: 'Title: Big day\n- one' }] }
 assert.equal(g.summary, '- one');
 assert.ok(K.groupKeyPointsText(g).startsWith('Key points \u2014 Day 1\n- one'));
 
+// Speakers.
+const sp = K.newRecording();
+K.addPhrase(sp, { text: 'so that is where the industry is heading' });
+assert.equal(K.plain(sp), 'So that is where the industry is heading.', 'one speaker: no labels');
+assert.equal(K.usesLabels(sp), false);
+K.declareSpeaker(sp, 'B');
+K.addPhrase(sp, { text: 'thanks my question is about training' }, { spk: 'B' });
+assert.equal(K.plain(sp), 'Speaker A: So that is where the industry is heading.\nSpeaker B: Thanks my question is about training.');
+assert.equal(K.currentSpeaker(sp), 'B');
+K.addPhrase(sp, { text: 'great question we pair everyone with a mentor' }, { spk: 'A' });
+K.renameSpeaker(sp, 'A', 'Moderator');
+assert.match(K.plain(sp), /^Moderator: So that/);
+assert.match(K.plain(sp), /\nModerator: Great question/);
+// Split a sentence where a new voice took over mid-phrase.
+const last = sp.phrases[2];
+K.splitTurn(sp, last.id, 2, K.declareSpeaker(sp, K.newSpeakerId(sp)));
+assert.match(K.plain(sp), /Moderator: Great question\.\nSpeaker C: We pair everyone with a mentor\.$/);
+// Unknown turn from the bubble, answered in Prep.
+K.addPhrase(sp, { text: 'can i follow up on that' }, { spk: '?' });
+assert.match(K.plain(sp), /\nUnknown speaker: Can i follow up on that\.$/);
+K.localCheck(sp);
+const uq = sp.flags.find((f) => f.kind === 'spk' && f.unknown);
+assert.ok(uq, 'unknown turn becomes a question');
+K.resolveSpeakerFlag(sp, uq, 'B');
+assert.match(K.plain(sp), /\nSpeaker B: Can i follow up on that\.$/);
+// Claude finds an unmarked change and guesses an unknown turn.
+K.addPhrase(sp, { text: 'yes absolutely next question please' }, { spk: '?' });
+const claudeSp = { content: [{ type: 'tool_use', input: { changes: [
+  { line: sp.phrases[sp.phrases.length - 1].id, quote: '', speaker: 'A', reason: 'host voice' },
+  { line: sp.phrases[0].id, quote: 'is where the industry', speaker: 'new', reason: 'test' },
+] } }] };
+assert.equal(K.applySpeakers(sp, claudeSp), 2);
+const guess = sp.flags.find((f) => f.kind === 'spk' && !f.unknown);
+assert.equal(guess.ws, 2);
+K.dismissSpeakerFlag(sp, guess);
+const u2 = sp.flags.find((f) => f.kind === 'spk' && f.unknown);
+assert.deepEqual(u2.sugg, ['A']);
+K.dismissSpeakerFlag(sp, u2);
+assert.match(K.plain(sp), /Speaker B: Can i follow up on that\. Yes absolutely next question please\.$/, 'not a change joins previous turn');
+assert.equal(K.speakerRequest(sp, {}, '').tool_choice.name, 'report_speakers');
+
 console.log('Dictation: recording logic checks out.');

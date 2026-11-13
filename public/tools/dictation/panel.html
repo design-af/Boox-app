@@ -45,6 +45,13 @@ button.on,button.dark{background:#000;color:#fff}
 #pop .r button{flex:1 1 auto;min-height:36px}
 .sm{font-size:.78rem;color:#333}
 .ask{flex:1.4;align-self:center;font-weight:700;font-size:.9rem;padding-left:4px}
+.tag{display:inline-block;padding:0 5px;margin-right:5px;font:700 12px/18px system-ui,sans-serif;background:#000;color:#fff;border:2px solid #000;vertical-align:1px}
+.tag.unk{background:#fff;color:#000;border-style:dashed}
+.tag.cur{outline:3px solid #000;outline-offset:2px}
+.spkq{display:inline-block;border:2px dotted #000;padding:0 3px;margin-right:4px;font:700 11px/16px system-ui,sans-serif}
+#spk-row{border-top:2px solid #000;align-items:center}
+#spk-row .lbl{flex:none;font-weight:700;font-size:.78rem;padding:0 2px}
+#pop input{display:block;width:100%;min-height:40px;border:2px solid #000;padding:0 8px;font:inherit;margin-top:4px;border-radius:0}
 </style>
 </head>
 <body>
@@ -65,6 +72,7 @@ button.on,button.dark{background:#000;color:#fff}
     <button id="clear-no">Cancel</button>
     <button id="clear-yes" class="dark">Yes, clear</button>
   </div>
+  <div class="row" id="spk-row"></div>
   <div class="row" id="act-live">
     <button id="move" class="dark" style="flex:1.6">Prep &#9656;</button>
     <button id="clear">Clear</button>
@@ -73,7 +81,8 @@ button.on,button.dark{background:#000;color:#fff}
   <div id="act-prep" hidden>
     <div class="row">
       <button id="check">Check</button>
-      <button id="points">Summarise</button>
+      <button id="speakers">Speakers</button>
+      <button id="points">Summary</button>
       <button id="view">Points</button>
     </div>
     <div class="row" style="padding-top:0">

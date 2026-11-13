@@ -17,6 +17,10 @@
   let partial = '', running = false, panelOpen = true, partialTimer = 0, lastPartialDraw = 0;
   let pending = { end: null, br: false };
   let flagIdx = -1, selWord = null, busy = false, confirmClear = false;
+  let splitSel = null;        // { p, i }: "new speaker from this word" (Live or Prep)
+  let renameSpk = null;       // speaker id being renamed in Prep
+  let badgeShown = null;      // last badge sent to the floating button
+  const declaredEarly = [];   // speakers added before the Live recording exists
   const undo = [];
   const calls = {};
   let callSeq = 0;
@@ -78,7 +82,8 @@
       save(rec);
       if (u.kind === 'live') live = rec; else prep = rec;
     }
-    flagIdx = -1; selWord = null;
+    flagIdx = -1; selWord = null; splitSel = null; renameSpk = null;
+    updateBadge();
     msg('Undone');
     renderAll();
   }
@@ -103,7 +108,7 @@
   }
   function setBusy(b, text) {
     busy = b;
-    ['check', 'points', 'push'].forEach((id) => { $(id).disabled = b; });
+    ['check', 'speakers', 'points', 'push'].forEach((id) => { $(id).disabled = b; });
     if (text) msg(text, b);
   }
 
@@ -117,6 +122,9 @@
         for (let i = f.ws; i < f.we; i++) flagged.set(f.p + ':' + i, idx);
       });
     }
+    const labels = K.usesLabels(rec);
+    const spkAt = new Map();
+    if (interactive) rec.flags.forEach((f) => { if (f.kind === 'spk' && !f.unknown) spkAt.set(f.p + ':' + f.ws, f); });
     let rows = K.render(rec, opts());
     if (tail && rows.length > tail) {
       out.push('<span class="sm">\u2026 earlier text is saved; it all goes to Prep.</span><br>');
@@ -126,6 +134,9 @@
     for (const r of rows) {
       if (r.sep === '\n') out.push('<br>');
       else if (r.sep) out.push(' ');
+      if (r.spk && labels) {
+        out.push('<span class="tag' + (r.spk === '?' ? ' unk' : '') + (renameSpk === r.spk ? ' cur' : '') + '" data-tag="' + esc(r.spk) + '" data-p="' + r.p.id + '">' + esc(K.speakerTag(rec, r.spk)) + '</span>');
+      }
       if (r.p.fixed) {
         out.push(esc(String(r.p.raw).trim()).replace(/\n/g, '<br>'));
         continue;
@@ -134,11 +145,15 @@
         let cls = 'w';
         const fi = flagged.get(r.p.id + ':' + i);
         if (fi !== undefined) cls += fi === flagIdx ? ' f cur' : ' f';
-        if (selWord && selWord.p === r.p.id && selWord.i === i) cls += ' sel';
-        out.push((i ? ' ' : '') + '<span class="' + cls + '" data-p="' + r.p.id + '" data-i="' + i + '">' + esc(w) + '</span>');
+        if ((selWord && selWord.p === r.p.id && selWord.i === i) || (splitSel && splitSel.p === r.p.id && splitSel.i === i)) cls += ' sel';
+        const q = spkAt.get(r.p.id + ':' + i);
+        out.push((i ? ' ' : '') + (q ? '<span class="spkq">\u00B6?</span>' : '') + '<span class="' + cls + '" data-p="' + r.p.id + '" data-i="' + i + '">' + esc(w) + '</span>');
       });
     }
-    if (withPartial) out.push(' <span class="partial" id="partial">' + esc(partial) + '</span>');
+    if (withPartial) {
+      const pt = pending.spk ? '<span class="tag' + (pending.spk === '?' ? ' unk' : '') + '">' + esc(K.speakerTag(rec, pending.spk)) + '</span>' : '';
+      out.push((pending.spk ? '<br>' + pt : ' ') + '<span class="partial" id="partial">' + esc(partial) + '</span>');
+    }
     return out.join('');
   }
 
@@ -197,10 +212,45 @@
     if (stick) c.scrollTop = c.scrollHeight;
   }
 
+  function speakerButtons(rec, attr, suggested) {
+    return K.speakerIds(rec).map((id) => '<button ' + attr + '="' + esc(id) + '"' + (suggested === id ? ' class="dark"' : '') + '>' + esc(K.speakerTag(rec, id)) + '</button>').join('') +
+      '<button ' + attr + '="new"' + (suggested === 'new' ? ' class="dark"' : '') + '>+ New</button>';
+  }
+
   function renderPop() {
     const pop = $('pop');
-    if (tab !== 'prep' || !prep || prepView !== 'text') { pop.className = ''; pop.innerHTML = ''; return; }
+    const hide = () => { pop.className = ''; pop.innerHTML = ''; };
+    const rec = tab === 'live' ? live : prep;
+    if (splitSel && rec) {
+      const p = K.phraseById(rec, splitSel.p);
+      const w = p ? K.words(p.raw)[splitSel.i] : '';
+      pop.innerHTML = '<div class="h">New speaker from \u201C<b>' + esc(w || '') + '</b>\u201D:</div><div class="r">' + speakerButtons(rec, 'data-split', null) + '</div>' +
+        '<div class="r"><button data-act="splitcancel">Cancel</button></div>';
+      pop.className = 'show';
+      return;
+    }
+    if (tab !== 'prep' || !prep || prepView !== 'text') { hide(); return; }
+    if (renameSpk) {
+      const cur = (prep.speakers && prep.speakers[renameSpk]) || '';
+      pop.innerHTML = '<div class="h"><label for="rn"><b>Rename ' + esc(renameSpk) + '</b></label> <span class="sm">Changes every ' + esc(renameSpk) + ' in this recording.</span></div>' +
+        '<input id="rn" type="text" autocomplete="off" value="' + esc(cur) + '" placeholder="Name or role">' +
+        '<div class="r">' + ['Moderator', 'Speaker', 'Audience', 'Panelist'].map((n) => '<button data-name="' + n + '">' + n + '</button>').join('') + '</div>' +
+        '<div class="r"><button data-act="rncancel">Cancel</button><button data-act="rnsave" class="dark">Save</button></div>';
+      pop.className = 'show';
+      return;
+    }
     const f = flagIdx >= 0 ? prep.flags[flagIdx] : null;
+    const nav = () => '<div class="r"><button data-act="prev">&lsaquo;</button><button data-act="next">' + (flagIdx + 1) + '/' + prep.flags.length + ' &rsaquo;</button><button data-act="done">Done</button></div>';
+    if (f && f.kind === 'spk') {
+      const p = K.phraseById(prep, f.p);
+      const w = p ? K.words(p.raw).slice(f.ws, f.ws + 4).join(' ') : '';
+      const head = f.unknown ? '<b>Who is this?</b> <span class="sm">' + esc(f.sugg && f.sugg.length ? 'Claude thinks ' + K.speakerTag(prep, f.sugg[0] === 'new' ? '?' : f.sugg[0]) + (f.sugg[0] === 'new' ? 'a new speaker' : '') + '.' : f.reason || '') + '</span>'
+        : '<b>New speaker from \u201C' + esc(w) + '\u2026\u201D?</b> <span class="sm">' + esc(f.reason || '') + ' \u00B7 Claude</span>';
+      pop.innerHTML = '<div class="h">' + head + '</div><div class="r">' + speakerButtons(prep, 'data-who', f.sugg && f.sugg[0]) +
+        '<button data-act="notchange">Not a change</button></div>' + nav();
+      pop.className = 'show';
+      return;
+    }
     if (f) {
       const p = K.phraseById(prep, f.p);
       const heard = p ? K.words(p.raw).slice(f.ws, f.we).join(' ') : '';
@@ -208,14 +258,14 @@
         '<div class="h">Heard “<b>' + esc(heard) + '</b>” <span class="sm">' + esc(f.reason || '') + (f.src === 'ai' ? ' · Claude' : ' · speech engine') + '</span></div>' +
         '<div class="r">' + f.sugg.map((s, i) => '<button data-sugg="' + i + '">' + esc(s) + '</button>').join('') +
         '<button data-act="keep">Keep</button><button data-act="del">Delete</button></div>' +
-        '<div class="r"><button data-act="prev">&lsaquo;</button><button data-act="next">' + (flagIdx + 1) + '/' + prep.flags.length + ' &rsaquo;</button><button data-act="done">Done</button></div>';
+        nav();
       pop.className = 'show';
     } else if (selWord) {
       const p = K.phraseById(prep, selWord.p);
       const w = p ? K.words(p.raw)[selWord.i] : '';
       pop.innerHTML = '<div class="h">“<b>' + esc(w || '') + '</b>”</div><div class="r">' +
         '<button data-act="delword">Delete word</button><button data-act="delphrase">Delete phrase</button>' +
-        '<button data-act="breakhere">New paragraph here</button><button data-act="close">Close</button></div>';
+        '<button data-act="spkhere">New speaker here</button><button data-act="close">Close</button></div>';
       pop.className = 'show';
     } else { pop.className = ''; pop.innerHTML = ''; }
   }
@@ -226,7 +276,8 @@
     $('t-live').textContent = 'Live' + (live && live.phrases.length ? ' (' + K.wordCount(live) + ')' : '');
     $('t-prep').textContent = 'Prep' + (prep ? (prep.flags.length ? ' (' + prep.flags.length + ' ?)' : ' ✓') : '');
     $('confirm-clear').hidden = !confirmClear || tab !== 'live';
-    $('act-live').hidden = tab !== 'live' || confirmClear;
+    $('act-live').hidden = tab !== 'live' || confirmClear || !!splitSel;
+    renderSpeakerRow();
     $('act-prep').hidden = tab !== 'prep';
     $('view').textContent = prepView === 'points' ? 'Text' : 'Points';
     $('push').innerHTML = prepView === 'points' ? 'Push pts &#9656;' : 'Push &#9656;';
@@ -234,12 +285,56 @@
     $('start').className = running ? 'dark' : '';
   }
 
+  function liveSpeakers() {
+    const ids = live ? K.speakerIds(live) : ['A'];
+    declaredEarly.forEach((id) => { if (!ids.includes(id)) ids.push(id); });
+    return ids;
+  }
+  const liveCurrent = () => pending.spk || (live ? K.currentSpeaker(live) : 'A');
+  const tagOf = (id) => live ? K.speakerTag(live, id) : (id === '?' ? '?' : id);
+
+  function renderSpeakerRow() {
+    const row = $('spk-row');
+    row.hidden = tab !== 'live' || confirmClear || !!splitSel;
+    if (row.hidden) return;
+    const cur = liveCurrent();
+    row.innerHTML = '<span class="lbl">Speaking</span>' + liveSpeakers().map((id) =>
+      '<button data-chip="' + esc(id) + '"' + (id === cur ? ' class="dark"' : '') + '>' + esc(tagOf(id)) + (id === cur ? ' \u25CF' : '') + '</button>').join('') +
+      (cur === '?' ? '<button class="dark" disabled>? \u25CF</button>' : '') +
+      '<button data-chip="new" style="flex:1.3">+ New</button>';
+  }
+
+  /** The letter on the floating button: the current speaker once there is more than one. */
+  function updateBadge() {
+    const cur = liveCurrent();
+    const b = cur === '?' || liveSpeakers().length > 1 ? (cur === '?' ? '?' : cur) : '';
+    if (b !== badgeShown) { badgeShown = b; if (N.setBadge) N.setBadge(b); }
+  }
+
+  function markSpeaker(id) {
+    if (id === 'new') {
+      id = live ? K.newSpeakerId(live) : 'ABCDEFGH'.split('').find((l) => !liveSpeakers().includes(l));
+      if (live) K.declareSpeaker(live, id); else declaredEarly.push(id);
+    }
+    if (pending.spk === id) { pending.spk = null; msg('Speaker mark cancelled'); }
+    else if (!pending.spk && id === (live ? K.currentSpeaker(live) : 'A')) { msg(tagOf(id) + ' is already speaking'); return; }
+    else {
+      pending.spk = id;
+      msg(tagOf(id) + (partial ? ' starts at the sentence being heard.' : ' starts at the next sentence.'));
+    }
+    if (live) saveLiveSoon();
+    updateBadge();
+    renderAll();
+  }
+
   function renderAll() {
     renderChrome();
     renderPop();
-    // While reviewing a word, its controls replace the Prep buttons to leave room for the text.
-    if ($('pop').className === 'show') $('act-prep').hidden = true;
+    // While reviewing or editing, the popover's controls replace the bottom buttons.
+    if ($('pop').className === 'show') { $('act-prep').hidden = true; $('act-live').hidden = true; $('spk-row').hidden = true; }
+    if (N.setFocusable) N.setFocusable(!!renameSpk);
     renderContent();
+    if (renameSpk && $('rn')) $('rn').focus();
   }
 
   // ---------------------------------------------------------------- native events
@@ -260,14 +355,22 @@
         live = K.newRecording();
         st.liveId = live.id;
         saveState();
+        declaredEarly.splice(0).forEach((id) => K.declareSpeaker(live, id));
       }
       K.addPhrase(live, h, pending);
       pending = { end: null, br: false };
       partial = '';
+      updateBadge();
       if (live.phrases.length === 1) save(live); else saveLiveSoon();
       if (!panelOpen) return;
       renderChrome();
       if (tab === 'live') renderContent();
+    },
+    onSpeakerMark() {
+      // Double-tap on the floating button: a new turn, speaker unknown (sorted out in Prep).
+      pending.spk = '?';
+      updateBadge();
+      if (panelOpen) { msg('New speaker marked (?). Say who in Prep.'); renderAll(); }
     },
     onCut() {
       if (!cutting) return;
@@ -314,6 +417,8 @@
   function setTab(t) {
     tab = t;
     confirmClear = false;
+    splitSel = null;
+    renameSpk = null;
     selWord = null;
     if (t !== 'prep') flagIdx = -1;
     renderAll();
@@ -321,7 +426,7 @@
 
   // Prep ▸ while recording: the recogniser first finishes the sentence being spoken (native
   // cut), that phrase lands in Live, then Live becomes a Prep segment and recording carries on
-  // into a new Live segment. The segment is then processed (Check + Key points) automatically.
+  // into a new Live segment. Nothing is sent to Claude until the user taps Check, Speakers or Summary.
   let cutting = false, cutTimer = 0;
   function prepClick() {
     if (cutting) return;
@@ -340,6 +445,7 @@
     live = null;
     st.liveId = null;
     saveState();
+    updateBadge();
     msg('Live cleared \u2014 Undo brings it back');
     renderAll();
   }
@@ -355,42 +461,26 @@
     saveState();
     flagIdx = -1; selWord = null; prepView = 'text';
     tab = 'prep';
+    updateBadge();
     renderAll();
     processSegment(prep);
   }
 
   /** Check + Key points for a segment that just arrived in Prep. */
-  async function processSegment(rec) {
-    const local = K.localCheck(rec);
+  /**
+   * A segment just arrived in Prep. Only on-tablet work happens here (words the speech engine
+   * was unsure of, unknown speaker turns); Claude runs only when the user taps Check, Speakers or
+   * Summary.
+   */
+  function processSegment(rec) {
+    K.localCheck(rec);
     save(rec);
     const cont = running ? ' Still recording into the next segment.' : '';
-    if (!settings.hasKey) {
-      if (prep === rec && tab === 'prep') flagIdx = rec.flags.length ? 0 : -1;
-      msg((rec.flags.length ? rec.flags.length + ' unsure words to review.' : 'Moved to Prep.') + cont, true);
-      renderAll();
-      return;
-    }
-    setBusy(true, 'Processing: checking words and writing key points\u2026' + cont);
-    const wantPoints = K.wordCount(rec) >= 15;
-    const [audit, points] = await Promise.allSettled([
-      claude(K.auditRequest(rec, opts(), settings.context)),
-      wantPoints ? claude(K.summaryRequest(rec, opts(), settings.context)) : Promise.resolve(null),
-    ]);
-    const problems = [];
-    if (audit.status === 'fulfilled') { try { K.applyAudit(rec, audit.value); } catch (e) { problems.push('check: ' + e.message); } }
-    else problems.push('check: ' + audit.reason.message);
-    if (points.status === 'fulfilled' && points.value) { try { K.applySummary(rec, points.value); } catch (e) { problems.push('key points: ' + e.message); } }
-    else if (points.status === 'rejected') problems.push('key points: ' + points.reason.message);
-    save(rec);
-    setBusy(false);
-    if (prep === rec && tab === 'prep' && prepView === 'text') flagIdx = rec.flags.length ? 0 : -1;
-    const done = [];
-    done.push(rec.flags.length ? rec.flags.length + ' to review' : 'nothing looks misheard');
-    if (rec.summary) done.push('key points ready');
-    msg('Ready: ' + done.join(', ') + '.' + (problems.length ? ' (' + problems.join('; ') + ')' : '') + cont, true);
+    const n = rec.flags.length;
+    if (prep === rec && tab === 'prep' && prepView === 'text') flagIdx = n ? 0 : -1;
+    msg((n ? 'Moved to Prep: ' + n + ' to review.' : 'Moved to Prep.') + ' Check, Speakers and Summary use Claude when you tap them.' + cont, true);
     renderAll();
   }
-
 
   async function check() {
     if (!prep || busy) return;
@@ -418,6 +508,34 @@
       msg('Claude check failed: ' + e.message + (local ? ' — showing ' + local + ' from the speech engine' : ''), true);
     }
     prepView = 'text';
+    renderAll();
+  }
+
+  /** Claude looks for speaker changes that were missed and says who the ? turns are. */
+  async function speakersCheck() {
+    if (!prep || busy) return;
+    snapshot('prep');
+    K.unknownTurnFlags(prep);
+    if (!settings.hasKey) {
+      save(prep);
+      const n = prep.flags.filter((f) => f.kind === 'spk').length;
+      flagIdx = prep.flags.findIndex((f) => f.kind === 'spk');
+      msg((n ? n + ' unknown speaker turns to sort out.' : 'No unknown turns.') + ' Add a Claude API key in the app to find missed changes.', true);
+      renderAll();
+      return;
+    }
+    setBusy(true, 'Claude is looking for speaker changes\u2026');
+    try {
+      const n = K.applySpeakers(prep, await claude(K.speakerRequest(prep, opts(), settings.context)));
+      save(prep);
+      prepView = 'text';
+      flagIdx = prep.flags.findIndex((f) => f.kind === 'spk');
+      setBusy(false);
+      msg(n ? n + ' speaker suggestions to review' : 'No missed speaker changes found \u2713');
+    } catch (e) {
+      setBusy(false);
+      msg('Speaker check failed: ' + e.message, true);
+    }
     renderAll();
   }
 
@@ -450,10 +568,36 @@
     N.push(text);
   }
 
-  function popAction(act, suggIdx) {
+  function popAction(act, suggIdx, b) {
+    const rec = tab === 'live' ? live : prep;
+    if (b && b.dataset.split && splitSel && rec) {
+      snapshot(tab === 'live' ? 'live' : 'prep');
+      let id = b.dataset.split;
+      if (id === 'new') id = K.newSpeakerId(rec);
+      K.splitTurn(rec, splitSel.p, splitSel.i, id);
+      save(rec);
+      splitSel = null;
+      msg(K.speakerTag(rec, id) + ' starts there.');
+      updateBadge();
+      renderAll();
+      return;
+    }
+    if (act === 'splitcancel') { splitSel = null; renderAll(); return; }
     if (!prep) return;
+    if (b && b.dataset.name && renameSpk) { $('rn').value = b.dataset.name; act = 'rnsave'; }
+    if (act === 'rnsave' && renameSpk) {
+      snapshot('prep'); K.renameSpeaker(prep, renameSpk, $('rn').value); save(prep);
+      renameSpk = null; renderAll(); return;
+    }
+    if (act === 'rncancel') { renameSpk = null; renderAll(); return; }
     const f = flagIdx >= 0 ? prep.flags[flagIdx] : null;
-    if (suggIdx != null && f) {
+    if (b && b.dataset.who && f && f.kind === 'spk') {
+      snapshot('prep'); K.resolveSpeakerFlag(prep, f, b.dataset.who); save(prep);
+    } else if (act === 'notchange' && f && f.kind === 'spk') {
+      snapshot('prep'); K.dismissSpeakerFlag(prep, f); save(prep);
+    } else if (act === 'spkhere' && selWord) {
+      splitSel = selWord; selWord = null; renderAll(); return;
+    } else if (suggIdx != null && f) {
       snapshot('prep'); K.applyFlag(prep, f, f.sugg[suggIdx]); save(prep);
     } else if (act === 'keep' && f) {
       snapshot('prep'); K.keepFlag(prep, f); save(prep);
@@ -512,14 +656,38 @@
   $('clear-no').onclick = () => { confirmClear = false; renderChrome(); };
   $('clear-yes').onclick = () => { confirmClear = false; clearLive(); };
   $('check').onclick = check;
+  $('speakers').onclick = speakersCheck;
+  $('spk-row').addEventListener('click', (e) => {
+    const b = e.target.closest('button[data-chip]');
+    if (b) markSpeaker(b.dataset.chip);
+  });
   $('points').onclick = keyPoints;
   $('view').onclick = () => { prepView = prepView === 'points' ? 'text' : 'points'; flagIdx = -1; selWord = null; renderAll(); };
   $('edit').onclick = () => { if (prep) N.openApp('tools/dictation/index.html#rec=' + prep.id); };
   $('push').onclick = push;
   document.querySelectorAll('.undo').forEach((b) => { b.onclick = doUndo; });
   $('content').addEventListener('click', (e) => {
+    const t = e.target.closest('.tag');
+    if (t && tab === 'prep' && prep && prepView === 'text') {
+      if (t.dataset.tag === '?') {
+        K.unknownTurnFlags(prep);
+        const fi = prep.flags.findIndex((f) => f.kind === 'spk' && f.unknown && f.p === Number(t.dataset.p));
+        if (fi >= 0) { flagIdx = fi; selWord = null; renameSpk = null; renderAll(); }
+        return;
+      }
+      renameSpk = t.dataset.tag; flagIdx = -1; selWord = null; splitSel = null;
+      renderAll();
+      return;
+    }
     const w = e.target.closest('.w');
+    if (w && tab === 'live' && live) {
+      // Tap a word in Live: a new speaker can start there.
+      splitSel = { p: Number(w.dataset.p), i: Number(w.dataset.i) };
+      renderAll();
+      return;
+    }
     if (!w || tab !== 'prep' || prepView !== 'text' || !prep) return;
+    renameSpk = null; splitSel = null;
     const p = Number(w.dataset.p), i = Number(w.dataset.i);
     const fi = prep.flags.findIndex((f) => f.p === p && i >= f.ws && i < f.we);
     if (fi >= 0) { flagIdx = fi; selWord = null; }
@@ -529,7 +697,7 @@
   $('pop').addEventListener('click', (e) => {
     const b = e.target.closest('button');
     if (!b || b.disabled) return;
-    popAction(b.dataset.act, b.dataset.sugg != null ? Number(b.dataset.sugg) : null);
+    popAction(b.dataset.act, b.dataset.sugg != null ? Number(b.dataset.sugg) : null, b);
   });
 
   // ---------------------------------------------------------------- start
@@ -554,6 +722,7 @@
       push(t) { console.log('PUSH', t); setTimeout(() => KB.onPushed('pasted'), 50); },
       cut() { setTimeout(() => { KB.onPhrase(JSON.stringify({ text: 'and that is the end of the sentence' })); KB.onCut(); }, 300); },
       remove(id) { ls.removeItem('rec:' + id); },
+      setBadge(b) { self.badge = b; }, setFocusable() { },
       list() {
         const out = [];
         for (let i = 0; i < ls.length; i++) {
