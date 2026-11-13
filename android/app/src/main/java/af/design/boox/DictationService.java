@@ -91,8 +91,9 @@ public class DictationService extends Service {
     private boolean cutPending;       // Prep ▸ asked to finish the current sentence
     private final Runnable cutFallback = () -> { if (cutPending) { cutPending = false; js("KB.onCut()"); } };
     private final Runnable cutForce = () -> {
-        if (cutPending && recognizer != null) {
-            try { recognizer.stopListening(); } catch (Exception ignored) { }
+        // "this." because recognizer is declared further down (no forward reference by simple name).
+        if (cutPending && this.recognizer != null) {
+            try { this.recognizer.stopListening(); } catch (Exception ignored) { }
         }
     };
     private boolean jsReady;
