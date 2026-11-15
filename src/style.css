@@ -83,7 +83,7 @@ code { font-size: 0.9em; border-bottom: 1px solid var(--ink); }
   min-width: 4.2em;
   text-align: center;
 }
-/* Aside Transcribe's logo: the glyph knocked out of a black square. */
+/* Tool logos (Aside, ARE, Template Maker): the glyph knocked out of a black square. */
 .tool-icon {
   flex: none;
   width: 3.4rem;
